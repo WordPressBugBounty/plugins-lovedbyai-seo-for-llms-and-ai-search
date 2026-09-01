@@ -3,7 +3,7 @@
  * Plugin Name: LovedByAI - Generative Engine Optimization AI Search
  * Description: Automatically optimize your website to ensure it gets noticed by LLMs and AI search engines.
  * Plugin URI: https://lovedby.ai
- * Version: 1.7.27
+ * Version: 1.7.28
  * Author: LovedByAI
  * Author URI: https://lovedby.ai
  * Requires PHP: 7.1
