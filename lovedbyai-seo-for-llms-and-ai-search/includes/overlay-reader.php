@@ -9,6 +9,11 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+// Required here rather than from the plugin's central include list: it is a data table this
+// file alone consumes, and requiring it locally keeps the standalone tests/overlay-merge-test.php
+// runnable without booting the plugin.
+require_once __DIR__ . '/schema-organization-types.php';
+
 if (!defined('GEOGURU_OVERLAY_POST_META_KEY')) {
     define('GEOGURU_OVERLAY_POST_META_KEY', '_geoguru_overlay_payload_v1');
 }
@@ -219,6 +224,47 @@ function geoguru_overlay_jsonld_root_types($obj) {
     return array();
 }
 
+/**
+ * Strips the vocabulary prefix from a written @type so the bare schema.org term is left.
+ *
+ * Documents setting "@context": "https://schema.org" write the bare term and that is the
+ * common case, but the full IRI and the "schema:" compact IRI name the same class.
+ */
+function geoguru_overlay_jsonld_bare_type($type) {
+    $type = trim((string) $type);
+    $type = preg_replace('#^https?://schema\.org/#i', '', $type);
+    return preg_replace('#^schema:#i', '', $type);
+}
+
+/** True when any of $types is Organization or one of its schema.org subclasses. */
+function geoguru_overlay_jsonld_is_organization($types) {
+    $organizations = geoguru_schema_organization_types();
+    foreach ($types as $type) {
+        if (isset($organizations[geoguru_overlay_jsonld_bare_type($type)])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Whether our block and an existing node describe the same kind of thing.
+ *
+ * A shared @type name is the ordinary signal. Organization needs the extra arm because we
+ * always emit the bare "Organization" while sites publish their business under a subclass --
+ * LocalBusiness, Corporation, InsuranceAgency. Those name the same class of entity, so a
+ * literal comparison found no match and our block was appended as a second node. Since we
+ * emit it under the @id the site's own Organization already uses, JSON-LD then requires
+ * consumers to merge the two into one entity holding both sets of values.
+ */
+function geoguru_overlay_jsonld_types_match($new_types, $existing_types) {
+    if (array_intersect($new_types, $existing_types)) {
+        return true;
+    }
+    return geoguru_overlay_jsonld_is_organization($new_types)
+        && geoguru_overlay_jsonld_is_organization($existing_types);
+}
+
 function geoguru_overlay_jsonld_merge($existing, $new) {
     if (!is_array($existing) || !is_array($new)) {
         return null;
@@ -229,7 +275,7 @@ function geoguru_overlay_jsonld_merge($existing, $new) {
     $new_types = geoguru_overlay_jsonld_root_types($new);
     $match = -1;
     foreach ($items as $idx => $item) {
-        if (array_intersect($new_types, geoguru_overlay_jsonld_root_types($item))) {
+        if (geoguru_overlay_jsonld_types_match($new_types, geoguru_overlay_jsonld_root_types($item))) {
             $match = $idx;
             break;
         }
