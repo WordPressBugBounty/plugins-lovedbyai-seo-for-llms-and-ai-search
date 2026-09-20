@@ -60,23 +60,72 @@ function geoguru_overlay_is_lovedbyai_fetch() {
     return isset($_SERVER['HTTP_X_GEOGURU_OPTIMIZER']) || isset($_SERVER['HTTP_X_LOVEDBYAI_VERIFY']);
 }
 
+/**
+ * Decode a stored overlay envelope for the post currently being rendered.
+ * Returns the payload array, or null when it must not be applied.
+ *
+ * Pure (no WP calls) so tests/overlay-payload-ownership-test.php can exercise the
+ * ownership rule without booting WordPress.
+ *
+ * The ownership check is the point. This payload lives in post meta, and WordPress
+ * duplication plugins copy post meta wholesale — so a duplicated post inherits the
+ * source post's optimized <title> and JSON-LD and, before this guard, served them as
+ * its own. Seen in production: a post published 2026-09-15 on dcf-contracting.com
+ * serving the optimized title of an older post it was duplicated from.
+ *
+ * An ABSENT stamp is deliberately allowed. Every payload already stored in the field
+ * predates this field, and refusing those would disable the overlay fleet-wide until
+ * each page is re-pushed. New writes are stamped, so the window closes as pages are
+ * re-optimized rather than all at once.
+ */
+function geoguru_overlay_payload_from_meta($raw, $post_id) {
+    if (!is_string($raw) || $raw === '') {
+        return null;
+    }
+
+    $envelope = json_decode($raw, true);
+    if (!is_array($envelope) || (isset($envelope['schemaVersion']) && (int) $envelope['schemaVersion'] !== 1)) {
+        return null;
+    }
+
+    // Loose-typed on purpose: post meta round-trips ids as strings, and treating
+    // "1001935" as a mismatch for 1001935 would silently switch the overlay off.
+    if (isset($envelope['postId']) && (int) $envelope['postId'] !== (int) $post_id) {
+        return null;
+    }
+
+    $payload = isset($envelope['payload']) && is_array($envelope['payload']) ? $envelope['payload'] : null;
+    if ($payload === null || (empty($payload['metaTitle']) && empty($payload['jsonLd']))) {
+        return null;
+    }
+
+    return $payload;
+}
+
 function geoguru_overlay_start_buffer() {
+    // get_queried_object_id() is not post-scoped. On a term archive it returns the TERM id, and
+    // feeding that to get_post_meta() below reads the payload of whichever POST happens to share
+    // that id -- so a category archive can render an unrelated post's optimized title. Seen in a
+    // repro: /product-category/training/ queries object id 2, and post 2 is "Sample Page".
+    //
+    // The ownership stamp cannot catch this. It compares the stamp to the id being asked for, and
+    // that payload's stamp IS that id -- it is the right payload for the wrong kind of object.
+    // Only the object's type distinguishes them.
+    //
+    // WP_Post, not is_singular(): the posts page is a real page the overlay does cover, and
+    // is_singular() is false there.
+    if (!(get_queried_object() instanceof WP_Post)) {
+        return;
+    }
+
     $post_id = (int) get_queried_object_id();
     if ($post_id <= 0) {
         return; // overlay is post-scoped; non-singular views have nothing to apply
     }
 
     $raw = get_post_meta($post_id, GEOGURU_OVERLAY_POST_META_KEY, true);
-    if (!is_string($raw) || $raw === '') {
-        return;
-    }
-
-    $envelope = json_decode($raw, true);
-    if (!is_array($envelope) || (isset($envelope['schemaVersion']) && (int) $envelope['schemaVersion'] !== 1)) {
-        return;
-    }
-    $payload = isset($envelope['payload']) && is_array($envelope['payload']) ? $envelope['payload'] : null;
-    if ($payload === null || (empty($payload['metaTitle']) && empty($payload['jsonLd']))) {
+    $payload = geoguru_overlay_payload_from_meta($raw, $post_id);
+    if ($payload === null) {
         return;
     }
 

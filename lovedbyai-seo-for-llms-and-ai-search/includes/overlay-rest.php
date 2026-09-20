@@ -49,6 +49,102 @@ function geoguru_rest_overlay_service_permission_callback($request) {
     return true;
 }
 
+/**
+ * Comparable form of a URL: its path, with everything that is a formatting detail removed.
+ *
+ * Scheme, host and query are dropped on purpose. The request has already authenticated against
+ * this one site, and home_url() legitimately differs from the URL we were handed by http/https,
+ * by www, or by a domain alias — none of which change which page is meant. The trailing slash
+ * goes for the same reason: it is a permalink-structure detail, not an identity one (the same
+ * site serves /industries/solar-web-design and /careers/ side by side). Percent-encoding is
+ * decoded so a permalink's /caf%C3%A9/ matches a pushed /café/.
+ *
+ * The one case where the query is NOT a formatting detail is handled by the caller: see
+ * geoguru_overlay_post_matches_url().
+ */
+function geoguru_overlay_url_path($url) {
+    $path = wp_parse_url((string) $url, PHP_URL_PATH);
+    if (!is_string($path) || $path === '') {
+        return '/';
+    }
+    $path = rtrim(rawurldecode($path), '/');
+    return $path === '' ? '/' : $path;
+}
+
+/** Raw query string of a URL, or '' when it has none. */
+function geoguru_overlay_url_query($url) {
+    $query = wp_parse_url((string) $url, PHP_URL_QUERY);
+    return is_string($query) ? $query : '';
+}
+
+/** Does this post currently live at this URL? */
+function geoguru_overlay_post_matches_url($post_id, $page_url) {
+    $permalink = get_permalink($post_id);
+    if (!is_string($permalink) || $permalink === '') {
+        return false;
+    }
+
+    $path = geoguru_overlay_url_path($permalink);
+    if ($path !== geoguru_overlay_url_path($page_url)) {
+        return false;
+    }
+
+    // On "/" the path carries no identity of its own. A site left on Plain permalinks gives every
+    // post the permalink /?p=N, so comparing paths alone would match ANY claimed id against ANY
+    // pushed URL on that site — which is the "one page serves another page's optimized title"
+    // failure this id is verified against in the first place. Compare the query there, and only
+    // there: on a real path it is utm_* noise and stays ignored.
+    //
+    // Failing this check is safe: resolution falls through to url_to_postid(), which understands
+    // ?p= and ?page_id= natively, so Plain-permalink sites resolve exactly as they did before.
+    if ($path === '/') {
+        return geoguru_overlay_url_query($permalink) === geoguru_overlay_url_query($page_url);
+    }
+
+    return true;
+}
+
+/**
+ * Map a pushed page_url to the post whose meta should carry its overlay payload.
+ *
+ * Returns array($post_id, $resolved_by); $post_id is 0 when the URL is not a post.
+ *
+ * url_to_postid() alone is not enough, because it only understands core rewrite rules:
+ *
+ *  - Sites that mint their own permalinks route them with their own `request` handler, so core
+ *    has no rule to match. rawcutcreative.com serves /waukegan/web-design-agency and
+ *    /industries/solar-web-design this way — real `cities` posts whose get_permalink() is exactly
+ *    the URL we push, yet url_to_postid() returns 0 for every one of them.
+ *  - A page assigned as the posts page is reachable only at the blog archive URL, which core maps
+ *    to the archive rather than to the page, so url_to_postid('/blog/') is 0 as well.
+ *
+ * Hence wp_post_id — which the optimizer carries from the WordPress REST API, where the post ID
+ * and its canonical link are read together — is tried first, and the posts page last.
+ */
+function geoguru_overlay_resolve_post_id($page_url, $claimed_post_id) {
+    // Verified against the post's current permalink rather than trusted: a post that has since
+    // been re-slugged or deleted (with its ID reused) would otherwise overlay the wrong page,
+    // and a discovered "page" that is really a taxonomy term carries a term ID, not a post ID.
+    $claimed_post_id = (int) $claimed_post_id;
+    if ($claimed_post_id > 0 && geoguru_overlay_post_matches_url($claimed_post_id, $page_url)) {
+        return array($claimed_post_id, 'wp_post_id');
+    }
+
+    $post_id = (int) url_to_postid($page_url);
+    if ($post_id > 0) {
+        return array($post_id, 'url_to_postid');
+    }
+
+    // The reader keys off get_queried_object_id(), which on the blog archive IS the posts page,
+    // so the payload does apply once it is stored there.
+    $page_for_posts = (int) get_option('page_for_posts');
+    if ($page_for_posts > 0 && geoguru_overlay_post_matches_url($page_for_posts, $page_url)) {
+        return array($page_for_posts, 'page_for_posts');
+    }
+
+    return array(0, 'unresolved');
+}
+
 function geoguru_rest_receive_overlay_payload($request) {
     $logger = GeoGuru_Logger::get_instance();
     $params = $request->get_json_params();
@@ -69,15 +165,22 @@ function geoguru_rest_receive_overlay_payload($request) {
         return new WP_Error('geoguru_overlay_bad_payload', 'envelope.payload must be an object', array('status' => 400));
     }
 
-    $post_id = 0;
-    if (isset($params['wp_post_id'])) {
-        $post_id = (int) $params['wp_post_id'];
+    $claimed_post_id = isset($params['wp_post_id']) ? (int) $params['wp_post_id'] : 0;
+    list($post_id, $resolved_by) = geoguru_overlay_resolve_post_id($page_url, $claimed_post_id);
+    if ($claimed_post_id > 0 && $resolved_by !== 'wp_post_id') {
+        // The optimizer's ID did not match this URL. Worth seeing: it means the page moved, was
+        // deleted, or was never a post — not just that this one push needs another strategy.
+        $logger->warning('REST overlay-payload: wp_post_id does not match page_url', array(
+            'page_url' => $page_url,
+            'wp_post_id' => $claimed_post_id,
+            'resolved_by' => $resolved_by,
+        ));
     }
     if ($post_id <= 0) {
-        $post_id = (int) url_to_postid($page_url);
-    }
-    if ($post_id <= 0) {
-        $logger->info('REST overlay-payload: could not resolve post id', array('page_url' => $page_url));
+        $logger->info('REST overlay-payload: could not resolve post id', array(
+            'page_url' => $page_url,
+            'had_wp_post_id' => $claimed_post_id > 0,
+        ));
         return new WP_Error('geoguru_overlay_no_post', 'Could not resolve WordPress post for page_url', array('status' => 404));
     }
 
@@ -88,6 +191,12 @@ function geoguru_rest_receive_overlay_payload($request) {
     if ($post->post_status === 'trash') {
         return new WP_Error('geoguru_overlay_trashed_post', 'Post is in trash', array('status' => 400));
     }
+
+    // Stamp the payload with the post it was resolved for. Post meta is copied wholesale by
+    // WordPress duplication plugins, so without this a duplicated post inherits — and serves —
+    // the source post's optimized title and JSON-LD. The reader refuses a mismatched stamp
+    // (see geoguru_overlay_payload_from_meta).
+    $envelope['postId'] = $post_id;
 
     $encoded = wp_json_encode($envelope);
     if (!is_string($encoded)) {
