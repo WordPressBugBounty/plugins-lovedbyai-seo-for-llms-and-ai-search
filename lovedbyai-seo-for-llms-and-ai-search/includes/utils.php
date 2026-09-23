@@ -221,4 +221,32 @@ class GeoGuru_Utils {
         GeoGuru_Logger::get_instance()->error('Inline script file missing or unreadable', array('script' => $name));
         return '';
     }
+
+    /**
+     * Whether an `upgrader_process_complete` payload names the given plugin.
+     *
+     * WordPress core reports which plugin(s) were just updated under one of two different keys,
+     * depending on which internal code path ran the update -- and both are common in production:
+     *
+     * - Plugin_Upgrader::bulk_upgrade(), used by the multi-select "Update" button on the Plugins
+     *   list, sets $options['plugins'] to an array of basenames.
+     * - Plugin_Upgrader::upgrade(), used by the single "Update now" link, background automatic
+     *   updates, and WP-CLI's `plugin update`, sets $options['plugin'] to one basename string.
+     *
+     * The second path is the one most updates actually take, so a check that only reads 'plugins'
+     * misses almost every update. Do not collapse this back down to a single key.
+     *
+     * @param array  $options         The upgrader_process_complete $options payload.
+     * @param string $plugin_basename The plugin basename to look for, e.g. plugin_basename(__FILE__).
+     * @return bool
+     */
+    public static function upgrader_targets_plugin($options, $plugin_basename) {
+        $updated_plugins = array();
+        if (isset($options['plugins']) && is_array($options['plugins'])) {
+            $updated_plugins = $options['plugins'];
+        } elseif (isset($options['plugin']) && is_string($options['plugin'])) {
+            $updated_plugins = array($options['plugin']);
+        }
+        return in_array($plugin_basename, $updated_plugins, true);
+    }
 }

@@ -3,7 +3,7 @@
  * Plugin Name: LovedByAI - Generative Engine Optimization AI Search
  * Description: Automatically optimize your website to ensure it gets noticed by LLMs and AI search engines.
  * Plugin URI: https://lovedby.ai
- * Version: 1.7.30
+ * Version: 2.0.0
  * Author: LovedByAI
  * Author URI: https://lovedby.ai
  * Requires PHP: 7.1
@@ -26,6 +26,7 @@ if (!defined('GEOGURU_PLUGIN_VERSION')) {
 $geoguru_required_files = [
     'includes/utils.php',
     'includes/logger.php',
+    'includes/delivery-settings.php',
     'includes/requests-interceptor.php',
     'includes/config-service.php',
     'includes/supabase-service.php',
@@ -37,6 +38,8 @@ $geoguru_required_files = [
     'includes/migration-manager.php',
     'includes/diagnostics-page.php',
     'includes/manual-credentials-page.php',
+    // Before the overlay files below, which read the stored envelope through its helpers.
+    'includes/overlay-payload.php',
     'includes/overlay-rest.php',
     'includes/overlay-reader.php',
     'includes/portal-bridge.php'
@@ -184,9 +187,6 @@ function geoguru_insert_plugin_default_config() {
             update_option('geoguru_portal_url', esc_url_raw($portal_url));
         }
     }
-    if (!get_option('geoguru_optimization_method')) {
-        update_option('geoguru_optimization_method', GeoGuru_OptimizationMethod::LLM_LINK_GENERATOR);
-    }
     if (!get_option('geoguru_supabase_url')) {
         $supabase_url = $config->get('SUPABASE_URL', 'https://sup.lovedby.ai');
         if (filter_var($supabase_url, FILTER_VALIDATE_URL)) {
@@ -219,9 +219,6 @@ function geoguru_insert_plugin_default_config() {
         $mixpanel_token = $config->get('MIXPANEL_TOKEN', '7a03831bc016b6a12830f3b94f8ff6dc');
         update_option('geoguru_mixpanel_token', $mixpanel_token);
     }
-    if (!get_option('geoguru_automatic_optimization_enabled')) {
-        update_option('geoguru_automatic_optimization_enabled', 1);
-    }
     if (!get_option('geoguru_llms_txt_enabled')) {
         update_option('geoguru_llms_txt_enabled', 1);
     }
@@ -236,9 +233,6 @@ function geoguru_insert_plugin_default_config() {
     }
     if (get_option('geoguru_indexnow_enabled', null) === null) {
         add_option('geoguru_indexnow_enabled', 1);
-    }
-    if (get_option('geoguru_apply_non_visible_overlay_on_original_page', null) === null) {
-        add_option('geoguru_apply_non_visible_overlay_on_original_page', 1);
     }
     if (!get_option('geoguru_indexnow_service_url')) {
         $indexnow_service_url = $config->get('INDEXNOW_SERVICE_URL', 'https://api.lovedby.ai');
@@ -261,6 +255,21 @@ function geoguru_reconcile_synced_settings() {
     $synced_settings = GeoGuru_SupabaseService::get_instance()->get_synced_settings($site_id, $secret_token);
     if (is_array($synced_settings)) {
         GeoGuru_SettingsSyncService::get_instance()->apply_synced_settings($synced_settings);
+    }
+}
+
+if (!defined('GEOGURU_RECONCILE_EVENT')) {
+    define('GEOGURU_RECONCILE_EVENT', 'geoguru_reconcile_synced_settings_event');
+}
+add_action(GEOGURU_RECONCILE_EVENT, 'geoguru_reconcile_synced_settings');
+
+/**
+ * Reconcile on the next WP-Cron run instead of now, for callers that must not wait on the fetch.
+ * One pending run is enough, however many times this is asked for before it happens.
+ */
+function geoguru_schedule_synced_settings_reconcile() {
+    if (!wp_next_scheduled(GEOGURU_RECONCILE_EVENT)) {
+        wp_schedule_single_event(time(), GEOGURU_RECONCILE_EVENT);
     }
 }
 
@@ -837,7 +846,25 @@ function geoguru_rest_get_settings($request) {
         'site_id' => sanitize_text_field(get_option('geoguru_site_id', '')),
         'secret_token' => sanitize_text_field(get_option('geoguru_secret_token', '')),
         'plugin_active' => (bool)get_option('geoguru_plugin_active', 1),
-        'optimization_method' => sanitize_text_field(get_option('geoguru_optimization_method', GeoGuru_OptimizationMethod::LLM_LINK_GENERATOR)),
+        // The bridge handshake also reports this, but it is absent whenever the bridge itself is
+        // unavailable, so a caller that can read settings can always read the version here too.
+        'plugin_version' => defined('GEOGURU_PLUGIN_VERSION') ? GEOGURU_PLUGIN_VERSION : 'unknown',
+        // The resolved pair. Delivery is reported here and nowhere else: the older
+        // optimization_method and automatic_optimization_enabled fields were projections of this
+        // one, and a caller derives whatever it needs from the pair instead.
+        'optimization_delivery' => geoguru_get_delivery_settings(),
+        // The vocabulary this build accepts, taken from the validator's own arrays so it cannot
+        // drift from what POST will allow. A caller checks a value against these before offering
+        // it, so it can never present a choice this build would 400 on.
+        //
+        // It does NOT make a caller future-proof on its own. A caller still hard-codes a label for
+        // each mechanism it displays, so a new value needs work there regardless -- what this
+        // prevents is the narrower and worse failure of offering a value the plugin will reject.
+        // Absence of the field means the build predates the delivery controls.
+        'optimization_delivery_options' => array(
+            'original' => geoguru_delivery_original_mechanisms(),
+            'mirror'   => geoguru_delivery_mirror_mechanisms(),
+        ),
         'llm_tracking_enabled' => (bool)get_option('geoguru_llm_tracking_enabled', 1),
         'portal_url' => esc_url_raw(get_option('geoguru_portal_url')),
         'show_logs_menu' => (bool)get_option('geoguru_show_logs_menu', 0),
@@ -845,7 +872,6 @@ function geoguru_rest_get_settings($request) {
         'llms_txt_enabled' => (bool)get_option('geoguru_llms_txt_enabled', 1),
         'indexnow_enabled' => (bool)get_option('geoguru_indexnow_enabled', 1),
         'indexnow_key' => sanitize_text_field(get_option('geoguru_indexnow_key', '')),
-        'automatic_optimization_enabled' => (bool)get_option('geoguru_automatic_optimization_enabled', 1),
         'llm_version_settings' => get_option('geoguru_llm_version_settings', array()),
         'wp_debug' => defined('WP_DEBUG') && WP_DEBUG,
         'site_url' => esc_url_raw(get_site_url())
@@ -872,13 +898,12 @@ function geoguru_rest_update_settings($request) {
     
     $site_id = isset($json_params['site_id']) ? sanitize_text_field($json_params['site_id']) : '';
     $secret_token = isset($json_params['secret_token']) ? sanitize_text_field($json_params['secret_token']) : '';
-    $optimization_method = isset($json_params['optimization_method']) ? sanitize_text_field($json_params['optimization_method']) : '';
+    $optimization_delivery = isset($json_params['optimization_delivery']) ? $json_params['optimization_delivery'] : null;
     // Properly convert string boolean values: "true"/"1" -> 1, "false"/"0"/empty -> 0
     // Store as integers (0/1) instead of booleans because WordPress deletes options when value is false
     $llm_tracking_enabled = isset($json_params['llm_tracking_enabled']) ? (filter_var($json_params['llm_tracking_enabled'], FILTER_VALIDATE_BOOLEAN) ? 1 : 0) : null;
     $show_logs_menu = isset($json_params['show_logs_menu']) ? (filter_var($json_params['show_logs_menu'], FILTER_VALIDATE_BOOLEAN) ? 1 : 0) : null;
     $log_level = isset($json_params['log_level']) ? sanitize_text_field($json_params['log_level']) : '';
-    $automatic_optimization_enabled = isset($json_params['automatic_optimization_enabled']) ? (filter_var($json_params['automatic_optimization_enabled'], FILTER_VALIDATE_BOOLEAN) ? 1 : 0) : null;
     $llms_txt_enabled = isset($json_params['llms_txt_enabled']) ? filter_var($json_params['llms_txt_enabled'], FILTER_VALIDATE_BOOLEAN) : null;
     $indexnow_enabled = isset($json_params['indexnow_enabled']) ? (filter_var($json_params['indexnow_enabled'], FILTER_VALIDATE_BOOLEAN) ? 1 : 0) : null;
     $indexnow_regenerate = ! empty($json_params['indexnow_regenerate']) && filter_var($json_params['indexnow_regenerate'], FILTER_VALIDATE_BOOLEAN);
@@ -892,13 +917,17 @@ function geoguru_rest_update_settings($request) {
     $brand_details_url = isset($json_params['brand_details_url']) ? esc_url_raw($json_params['brand_details_url']) : null;
 
     $has_brand = $white_label_enabled !== null || $brand_display_name !== null || $brand_plugin_name !== null || $brand_plugin_author !== null || $brand_logo !== null || $brand_details_url !== null;
-    $has_other = $site_id !== '' || $secret_token !== '' || $optimization_method !== '' || $llm_tracking_enabled !== null || $show_logs_menu !== null || $log_level !== '' || $automatic_optimization_enabled !== null || $llms_txt_enabled !== null || $indexnow_enabled !== null || $indexnow_regenerate || $llm_version_settings !== null;
+    $has_other = $site_id !== '' || $secret_token !== '' || $optimization_delivery !== null || $llm_tracking_enabled !== null || $show_logs_menu !== null || $log_level !== '' || $llms_txt_enabled !== null || $indexnow_enabled !== null || $indexnow_regenerate || $llm_version_settings !== null;
     if (!$has_brand && !$has_other) {
         return new WP_Error('no_settings', 'At least one setting must be provided', array('status' => 400));
     }
-    if (!empty($optimization_method)) {
-        if (!in_array($optimization_method, array(GeoGuru_OptimizationMethod::LLM_LINK_GENERATOR, GeoGuru_OptimizationMethod::REQUESTS_INTERCEPTOR))) {
-            return new WP_Error('invalid_optimization_method', 'Invalid optimization method', array('status' => 400));
+    $validated_delivery = null;
+    if ($optimization_delivery !== null) {
+        // Same all-or-nothing rule the sync route applies. A half-valid pair would leave the site
+        // running one target from the request and the other from wherever it resolved before.
+        $validated_delivery = geoguru_delivery_validate($optimization_delivery);
+        if ($validated_delivery === null) {
+            return new WP_Error('invalid_optimization_delivery', 'Invalid optimization delivery', array('status' => 400));
         }
     }
     
@@ -925,8 +954,8 @@ function geoguru_rest_update_settings($request) {
     if (!empty($secret_token)) {
         update_option('geoguru_secret_token', $secret_token);
     }
-    if (!empty($optimization_method)) {
-        update_option('geoguru_optimization_method', $optimization_method);
+    if ($validated_delivery !== null) {
+        geoguru_delivery_store($validated_delivery);
     }
     if ($llm_tracking_enabled !== null) {
         update_option('geoguru_llm_tracking_enabled', (int)$llm_tracking_enabled);
@@ -989,10 +1018,6 @@ function geoguru_rest_update_settings($request) {
     if (!empty($log_level)) {
         update_option('geoguru_log_level', $log_level);
     }
-    if ($automatic_optimization_enabled !== null) {
-        update_option('geoguru_automatic_optimization_enabled', $automatic_optimization_enabled);
-    }
-
     // Handle LLM version settings
     if ($llm_version_settings !== null) {
         // Parse JSON if sent as string
@@ -1066,6 +1091,8 @@ function geoguru_rest_reset_settings($request) {
     delete_option('geoguru_llms_txt_config');
     delete_option('geoguru_llm_version_settings');
     delete_option('geoguru_apply_non_visible_overlay_on_original_page');
+    delete_option(GEOGURU_DELIVERY_OPTION);
+    delete_option(GeoGuru_SettingsSyncService::APPLIED_VALUES_OPTION);
 
     // Restore original user
     wp_set_current_user($original_user_id);
@@ -1219,6 +1246,17 @@ function geoguru_plugin_activated() {
         if ($supabase_service->verify_website_credentials($site_id, $secret_token)) {
             $logger->info('Existing credentials verified successfully, no registration needed');
 
+            // Run pending migrations before reconciling, matching the two other reconcile call
+            // sites below (~upgrader_process_complete and ~admin_init). Order matters: reconcile
+            // can derive and WRITE a delivery pair from the overlay_bool backend value (see
+            // settings-sync-service.php's 'overlay_bool' case), and once any pair is stored, the
+            // 2.0.0 migration sees a valid pair already set and declines to run -- permanently
+            // stranding the site on whatever reconcile happened to write instead of the pair the
+            // migration would have given it.
+            if (class_exists('GeoGuru_MigrationManager')) {
+                GeoGuru_MigrationManager::get_instance()->check_and_run_migrations();
+            }
+
             // Reconcile local options to the backend's source of truth, so a value set
             // server-side applies to this site even if an earlier sync never reached it.
             geoguru_reconcile_synced_settings();
@@ -1273,6 +1311,7 @@ function geoguru_plugin_activated() {
 function geoguru_plugin_deactivate() {
     $logger = GeoGuru_Logger::get_instance();
     $logger->info('Plugin deactivation started');
+    wp_clear_scheduled_hook(GEOGURU_RECONCILE_EVENT);
 
     $deactivate_site_id = get_option('geoguru_site_id', '');
     $deactivate_secret = get_option('geoguru_secret_token', '');
@@ -1336,6 +1375,9 @@ function geoguru_plugin_uninstall() {
     delete_option('geoguru_log_level');
     delete_option('geoguru_automatic_optimization_enabled');
     delete_option('geoguru_apply_non_visible_overlay_on_original_page');
+    delete_option(GEOGURU_DELIVERY_OPTION);
+    delete_option(GeoGuru_SettingsSyncService::APPLIED_VALUES_OPTION);
+    wp_clear_scheduled_hook(GEOGURU_RECONCILE_EVENT);
     delete_option('geoguru_supabase_url');
     delete_option('geoguru_supabase_anon_key');
     delete_option('geoguru_fire_and_forget_worker_url');
@@ -1711,6 +1753,9 @@ function geoguru_render_portal_page() {
     $params = array(
         'wp_rest_url' => $safe_rest_url,
         'wp_nonce' => $safe_nonce,
+        // So the portal knows which build it is talking to before it has fetched anything.
+        // /settings reports this too, but not until a request has come back.
+        'wp_plugin_version' => GEOGURU_PLUGIN_VERSION,
     );
     if (geoguru_is_white_label()) {
         $params['wp_white_label'] = 'true';
@@ -1770,6 +1815,9 @@ function geoguru_render_portal_settings_page() {
     $params = array(
         'wp_rest_url' => $safe_rest_url,
         'wp_nonce' => $safe_nonce,
+        // So the portal knows which build it is talking to before it has fetched anything.
+        // /settings reports this too, but not until a request has come back.
+        'wp_plugin_version' => GEOGURU_PLUGIN_VERSION,
     );
     if (geoguru_is_white_label()) {
         $params['wp_white_label'] = 'true';
@@ -1806,13 +1854,7 @@ add_action('plugins_loaded', function () {
         $plugin_active = get_option('geoguru_plugin_active', true); // Default to true for backwards compatibility
         $secret_token = get_option('geoguru_secret_token', '');
         $site_id = get_option('geoguru_site_id', '');
-        $optimization_method = get_option('geoguru_optimization_method');
-        
-        if (!$optimization_method) {
-            add_option('geoguru_optimization_method', GeoGuru_OptimizationMethod::LLM_LINK_GENERATOR);
-            $optimization_method = GeoGuru_OptimizationMethod::LLM_LINK_GENERATOR;
-        }
-        
+
         // Only start interceptor if plugin is active and site is properly registered
         if ($plugin_active && !empty($secret_token) && !empty($site_id)) {
             if (class_exists('GeoGuru_RequestsInterceptor')) {
@@ -1850,7 +1892,10 @@ add_action('init', function() {
 // Ensure security files are updated and default options are set when plugin is updated
 add_action('upgrader_process_complete', function($upgrader_object, $options) {
     if ($options['action'] === 'update' && $options['type'] === 'plugin') {
-        if (isset($options['plugins']) && in_array(plugin_basename(__FILE__), $options['plugins'])) {
+        // GeoGuru_Utils::upgrader_targets_plugin() checks both the 'plugins' (array) and
+        // 'plugin' (string) shapes WordPress core can send here -- see its docblock in
+        // includes/utils.php for why a single-key check misses most updates.
+        if (GeoGuru_Utils::upgrader_targets_plugin($options, plugin_basename(__FILE__))) {
             $logger = GeoGuru_Logger::get_instance();
             $logger->ensure_security_files();
             // Trigger migration check as backup (migrations also run on admin_init)
@@ -1859,8 +1904,12 @@ add_action('upgrader_process_complete', function($upgrader_object, $options) {
             }
             // Ensure all default options are set during update
             geoguru_insert_plugin_default_config();
-            // Converge to the backend's source of truth on update.
-            geoguru_reconcile_synced_settings();
+            // Converge to the synced settings -- but not here. The fetch can wait up to 30 seconds,
+            // and this runs inside the update request itself (a single "Update now", an automatic
+            // update, WP-CLI), which made every update wait on it. The next admin page load
+            // reconciles on the version change anyway; the scheduled run covers a site nobody logs
+            // into, and runs with the updated code rather than the code being replaced.
+            geoguru_schedule_synced_settings_reconcile();
             $logger->info('Default plugin options initialized during update');
         }
     }

@@ -704,6 +704,34 @@ function geoguru_diagnostic_check_options() {
 
     delete_option(GEOGURU_DIAGNOSTIC_OPTION_TEST_KEY);
 
+    if (function_exists('geoguru_get_delivery_settings')) {
+        $delivery = geoguru_get_delivery_settings();
+        $has_stored_pair = geoguru_delivery_validate(get_option(GEOGURU_DELIVERY_OPTION, null)) !== null;
+
+        if ($has_stored_pair) {
+            $source_label = __('from the synced setting', 'lovedbyai-seo-for-llms-and-ai-search');
+        } else {
+            // Asked of the same function the resolver used, so the label names the outcome that
+            // actually produced $delivery.
+            $derived = geoguru_derive_delivery_from_legacy_method(get_option('geoguru_optimization_method', ''));
+            $source_label = ($derived !== geoguru_delivery_default())
+                ? __('derived from an older setting on this site', 'lovedbyai-seo-for-llms-and-ai-search')
+                : __('the default setting', 'lovedbyai-seo-for-llms-and-ai-search');
+        }
+
+        $results['delivery'] = array(
+            'label' => __('Optimization delivery (resolved)', 'lovedbyai-seo-for-llms-and-ai-search'),
+            'pass' => true,
+            'message' => sprintf(
+                /* translators: 1: original-page mechanism, 2: mirror-page mechanism, 3: where the value came from */
+                __('original: %1$s, mirror: %2$s (%3$s)', 'lovedbyai-seo-for-llms-and-ai-search'),
+                $delivery['original'],
+                $delivery['mirror'],
+                $source_label
+            ),
+        );
+    }
+
     return $results;
 }
 

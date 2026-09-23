@@ -135,6 +135,21 @@ function geoguru_overlay_resolve_post_id($page_url, $claimed_post_id) {
         return array($post_id, 'url_to_postid');
     }
 
+    // A slug that is not plain ASCII -- Hebrew, Arabic, Cyrillic, Greek, CJK -- travels
+    // percent-encoded, and for a page with a parent core does not match that encoded path against
+    // the stored slug: the same URL decoded resolves, the encoded one gives 0. Only reached when no
+    // usable wp_post_id came with the push, which is the case this exists for.
+    //
+    // rawurldecode, not urldecode: the latter also turns '+' into a space, which is a legal
+    // character in a slug and would corrupt the path.
+    $decoded = rawurldecode($page_url);
+    if ($decoded !== $page_url) {
+        $post_id = (int) url_to_postid($decoded);
+        if ($post_id > 0) {
+            return array($post_id, 'url_to_postid_decoded');
+        }
+    }
+
     // The reader keys off get_queried_object_id(), which on the blog archive IS the posts page,
     // so the payload does apply once it is stored there.
     $page_for_posts = (int) get_option('page_for_posts');
@@ -143,6 +158,56 @@ function geoguru_overlay_resolve_post_id($page_url, $claimed_post_id) {
     }
 
     return array(0, 'unresolved');
+}
+
+/**
+ * The entry ids an envelope carries: the head slots first, then the blocks in their own order.
+ *
+ * Reported back so the sender can record exactly which entries reached this site rather than
+ * assuming the whole envelope landed. Ids are opaque strings here -- the plugin never parses or
+ * validates their shape. A v1 envelope carries no ids and so reports none.
+ *
+ * @param mixed $envelope Decoded envelope.
+ * @return string[] Ids, possibly empty.
+ */
+function geoguru_overlay_rest_entry_ids($envelope) {
+    $ids = array();
+    if (geoguru_overlay_envelope_version($envelope) !== 2) {
+        return $ids;
+    }
+
+    $entries = array();
+    if (isset($envelope['head']) && is_array($envelope['head'])) {
+        if (isset($envelope['head']['metaTitle']) && is_array($envelope['head']['metaTitle'])) {
+            $entries[] = $envelope['head']['metaTitle'];
+        }
+        if (isset($envelope['head']['jsonLd']) && is_array($envelope['head']['jsonLd'])) {
+            foreach ($envelope['head']['jsonLd'] as $slot) {
+                if (is_array($slot)) {
+                    $entries[] = $slot;
+                }
+            }
+        }
+    }
+    if (isset($envelope['blocks']) && is_array($envelope['blocks'])) {
+        foreach ($envelope['blocks'] as $block) {
+            if (is_array($block)) {
+                $entries[] = $block;
+            }
+        }
+    }
+
+    foreach ($entries as $entry) {
+        if (!isset($entry['changeId']) || !is_string($entry['changeId']) || $entry['changeId'] === '') {
+            continue;
+        }
+        if (in_array($entry['changeId'], $ids, true)) {
+            continue;
+        }
+        $ids[] = $entry['changeId'];
+    }
+
+    return $ids;
 }
 
 function geoguru_rest_receive_overlay_payload($request) {
@@ -158,11 +223,29 @@ function geoguru_rest_receive_overlay_payload($request) {
         return new WP_Error('geoguru_overlay_bad_request', 'page_url and envelope are required', array('status' => 400));
     }
 
-    if (!isset($envelope['schemaVersion']) || (int) $envelope['schemaVersion'] !== 1) {
+    // v1 and v2 are both accepted. Anything else keeps this exact error code and status: the
+    // sender treats a geoguru_overlay_bad_schema rejection as "this site runs an older plugin"
+    // and retries in the shape that plugin understands, so the code is part of the contract.
+    $version = geoguru_overlay_envelope_version($envelope);
+    if ($version !== 1 && $version !== 2) {
         return new WP_Error('geoguru_overlay_bad_schema', 'Unsupported envelope schemaVersion', array('status' => 400));
     }
-    if (!isset($envelope['payload']) || !is_array($envelope['payload'])) {
-        return new WP_Error('geoguru_overlay_bad_payload', 'envelope.payload must be an object', array('status' => 400));
+
+    if ($version === 1) {
+        if (!isset($envelope['payload']) || !is_array($envelope['payload'])) {
+            return new WP_Error('geoguru_overlay_bad_payload', 'envelope.payload must be an object', array('status' => 400));
+        }
+    } else {
+        // v2 has no `payload`; it carries `head` and `blocks`. Either may be omitted, but an
+        // envelope with neither has nothing to store.
+        $has_head = isset($envelope['head']);
+        $has_blocks = isset($envelope['blocks']);
+        if (!$has_head && !$has_blocks) {
+            return new WP_Error('geoguru_overlay_bad_payload', 'envelope.head or envelope.blocks is required', array('status' => 400));
+        }
+        if (($has_head && !is_array($envelope['head'])) || ($has_blocks && !is_array($envelope['blocks']))) {
+            return new WP_Error('geoguru_overlay_bad_payload', 'envelope.head must be an object and envelope.blocks an array', array('status' => 400));
+        }
     }
 
     $claimed_post_id = isset($params['wp_post_id']) ? (int) $params['wp_post_id'] : 0;
@@ -192,10 +275,22 @@ function geoguru_rest_receive_overlay_payload($request) {
         return new WP_Error('geoguru_overlay_trashed_post', 'Post is in trash', array('status' => 400));
     }
 
+    // Refuse an envelope older than the one this post already carries, rather than letting a slow
+    // push put older content back on the page. Its own code, so the sender can tell "a newer one is
+    // already here" from a push that failed.
+    $previous_raw = get_post_meta($post_id, GEOGURU_OVERLAY_POST_META_KEY, true);
+    if (geoguru_overlay_is_superseded($envelope, $previous_raw, $post_id)) {
+        $logger->info('REST overlay-payload: refused an envelope older than the stored one', array(
+            'post_id' => $post_id,
+            'updated_at' => $envelope['updatedAt'],
+        ));
+        return new WP_Error('geoguru_overlay_superseded', 'A newer envelope is already stored for this post', array('status' => 409));
+    }
+
     // Stamp the payload with the post it was resolved for. Post meta is copied wholesale by
     // WordPress duplication plugins, so without this a duplicated post inherits — and serves —
     // the source post's optimized title and JSON-LD. The reader refuses a mismatched stamp
-    // (see geoguru_overlay_payload_from_meta).
+    // (see geoguru_overlay_envelope_from_meta).
     $envelope['postId'] = $post_id;
 
     $encoded = wp_json_encode($envelope);
@@ -217,8 +312,12 @@ function geoguru_rest_receive_overlay_payload($request) {
 
     $logger->info('REST overlay-payload: stored', array('post_id' => $post_id, 'page_url' => $page_url));
 
-    // Purge this page's cache so the reader re-merges the new payload on the next request.
-    if (function_exists('geoguru_overlay_purge_caches')) {
+    // Purge this page's cache so the reader re-merges the new payload on the next request -- unless
+    // the content is what the post already carried, in which case nothing a visitor sees has changed.
+    // The envelope is still written above, so its stamp moves on and a slower, older one is still
+    // refused after it.
+    $unchanged = geoguru_overlay_same_content($envelope, $previous_raw, $post_id);
+    if (!$unchanged && function_exists('geoguru_overlay_purge_caches')) {
         geoguru_overlay_purge_caches($post_id);
     }
 
@@ -226,6 +325,7 @@ function geoguru_rest_receive_overlay_payload($request) {
         array(
             'ok' => true,
             'post_id' => $post_id,
+            'stored' => geoguru_overlay_rest_entry_ids($envelope),
         ),
         200
     );

@@ -4,7 +4,7 @@ Tags: geo, generative engine optimization, ai search optimization, aeo, answer e
 Requires at least: 5.8
 Tested up to: 7.1
 Requires PHP: 7.1
-Stable tag: 1.7.30
+Stable tag: 2.0.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -99,6 +99,10 @@ Yes. A free account at lovedby.ai is required to use this plugin. The free tier 
 The plugin embeds a service management interface (portal app) via iframe for configuration, monitoring, and analytics. This interface is hosted on LovedByAI servers and requires an active account connection.
 
 ## Changelog
+
+### 2.0.0
+- You can now control, per site, how optimizations are delivered to the canonical page and to the AI version page.
+- Content changes you have approved can now be applied to the page itself, not only to the AI version page.
 
 ### 1.0.0
 - Initial release.

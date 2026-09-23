@@ -12,6 +12,10 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
         private $is_intercepting = false;
         private $shortcode_rendered = false;
         private $supabase_service;
+        // Set once by intercept_request(), which is the only place delivery is inspected. The
+        // shortcode callback fires later, during rendering, and reads the decision rather than
+        // re-deciding.
+        private $llm_link_enabled = false;
 
         public static function get_instance(): GeoGuru_RequestsInterceptor {
             if (null === self::$instance) {
@@ -211,6 +215,12 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
          * Renders the LLM link inline and sets flag to skip footer output.
          */
         public function render_llm_link_shortcode($atts) {
+            // The link points at the mirror; with no mirror there is nothing to point at. Return an
+            // empty string rather than deregistering the shortcode, which would print the raw tag.
+            if (!$this->llm_link_enabled) {
+                return '';
+            }
+
             $options = get_option('geoguru_llm_version_settings', array());
             $link_text = isset($options['link_text']) ? $options['link_text'] : 'Hey AI, learn about this page';
 
@@ -257,32 +267,63 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
 
             $this->maybe_disable_litespeed_for_optimizer();
 
-            $optimization_method = get_option('geoguru_optimization_method');
-            if (!$optimization_method || $optimization_method === '') {
-                $optimization_method = 'llm_link_generator';
-            }
+            // The one place delivery is read. Everything below decides from these locals; the
+            // functions they call take no view of their own, so there is a single answer per
+            // request to what this site delivers and where.
+            $delivery = geoguru_get_delivery_settings();
+            $this->llm_link_enabled = $delivery['mirror'] !== 'off';
+            // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only surface check, no nonce needed
+            $is_mirror_request = isset($_GET['llm_view']) && $_GET['llm_view'] == '1';
 
-            if ($optimization_method === 'llm_link_generator') {
-                // Enqueue styles and script properly
-                add_action('wp_enqueue_scripts', array($this, 'enqueue_llm_link_styles'));
-                add_action('wp_enqueue_scripts', array($this, 'enqueue_llm_link_script'));
-
-                // Register shortcode so users can place the link anywhere via [lovedbyai_link]
-                add_shortcode('lovedbyai_link', array($this, 'render_llm_link_shortcode'));
-
-                // Original-page overlay: merge non-visible head fields into the NORMAL WP render.
-                // Scoped to this method only — the requests_interceptor method (handle_optimize_on_page
-                // below) echoes a full optimized document for bots, which must never be buffered/merged.
-                // geoguru_overlay_register() also bails on ?llm_view=1 (that path serves the full document).
-                if (function_exists('geoguru_overlay_register')) {
-                    geoguru_overlay_register();
-                }
-
-                $this->handle_llm_version_optimization();
+            // Serving a complete optimized document at the canonical URL. This path echoes its own
+            // response for bots and must never be combined with the overlay, which buffers and
+            // merges into the normal WordPress render.
+            if ($delivery['original'] === 'cdn_fetch') {
+                $this->handle_optimize_on_page();
                 return;
             }
 
-            $this->handle_optimize_on_page();
+            // Always registered, even when the link is suppressed: without add_shortcode()
+            // WordPress renders [lovedbyai_link] as literal text on every page that uses it.
+            // render_llm_link_shortcode() returns an empty string instead.
+            add_shortcode('lovedbyai_link', array($this, 'render_llm_link_shortcode'));
+
+            if ($this->llm_link_enabled) {
+                add_action('wp_enqueue_scripts', array($this, 'enqueue_llm_link_styles'));
+                add_action('wp_enqueue_scripts', array($this, 'enqueue_llm_link_script'));
+            }
+
+            // The overlay is needed for this render when the canonical page's own mechanism calls
+            // for it, or -- independently -- when this is the ?llm_view=1 mirror and the mirror's
+            // own mechanism does, even if `original` is off. geoguru_overlay_register() re-derives
+            // both and makes the precise decision (e.g. never double up with a CDN-served mirror);
+            // this is only the coarse pre-check for whether it is worth calling at all.
+            $needs_overlay = $delivery['original'] === 'page_replacement'
+                || ($is_mirror_request && $delivery['mirror'] === 'page_replacement');
+            if ($needs_overlay && function_exists('geoguru_overlay_register')) {
+                geoguru_overlay_register();
+            }
+
+            $bot_parameters = $this->detect_current_bot();
+            if ($bot_parameters['is_bot']) {
+                $this->log_bot_crawl_on_shutdown($bot_parameters);
+            }
+
+            if ($is_mirror_request) {
+                // cdn_fetch serves the pre-built document at the CDN object key directly.
+                if ($delivery['mirror'] === 'cdn_fetch') {
+                    $this->handle_llm_version_page();
+                }
+                // Otherwise fall through to a normal WordPress render. Mirror off is deliberate --
+                // an already-crawled ?llm_view=1 URL keeps serving the canonical page's own
+                // mechanism. Mirror page_replacement falls through here too: the overlay
+                // registered above applies the stored payload to this very render.
+                return;
+            }
+
+            if ($this->llm_link_enabled) {
+                add_action('wp_footer', array($this, 'display_footer_links'));
+            }
         }
 
         private function should_skip(): bool {
@@ -344,46 +385,52 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
             }
         }
 
-        private function handle_llm_version_optimization() {
-            $this->logger->debug('Handling LLM link generator', ['wp_hook' => current_action()]);
+        /**
+         * Which crawler, if any, is making this request.
+         */
+        private function detect_current_bot() {
+            $user_agent = isset($_SERVER['HTTP_USER_AGENT']) ? sanitize_text_field( wp_unslash ($_SERVER['HTTP_USER_AGENT'])) : '';
+            return GeoGuru_Utils::detect_bot($user_agent);
+        }
 
-            // After modification completes, log the crawl and trigger async optimization with the captured content
-            add_action('shutdown', function() {
-                $this->logger->debug('running shutdown function', ['wp_hook' => current_action()]);
-                $site_id = get_option('geoguru_site_id', '');
-                $secret_token = get_option('geoguru_secret_token', '');
+        /**
+         * Record a crawler hit for this request, sent once the response is out.
+         *
+         * Independent of what, if anything, gets delivered: this is traffic reporting for the site
+         * owner, and a crawler visit is worth reporting whether or not the page was optimized.
+         *
+         * $status is 'success' everywhere except the CDN-document branch, which reports
+         * 'processing' when it found nothing to serve. IMPORTANT: no other branch writes that
+         * value, which makes it the only signal telling us a site runs that mechanism -- nothing on
+         * our side records which mechanism a site is on. It looks incidental; it is not. Do not
+         * normalise it to 'success'.
+         *
+         * @param array  $bot_parameters From detect_current_bot(); the caller has confirmed is_bot.
+         * @param string $status
+         */
+        private function log_bot_crawl_on_shutdown(array $bot_parameters, $status = 'success') {
+            $site_id = get_option('geoguru_site_id', '');
+            $secret_token = get_option('geoguru_secret_token', '');
 
-                if (empty($site_id) || empty($secret_token)) {
-                    $this->logger->warning('Site credentials not found, cannot log crawl request', ['wp_hook' => current_action()]);
+            if (empty($site_id) || empty($secret_token)) {
+                $this->logger->warning('Site credentials not found, cannot log crawl request', ['wp_hook' => current_action()]);
+                return;
+            }
+
+            $this->logger->debug('Registering shutdown crawl log', ['wp_hook' => current_action()]);
+
+            add_action('shutdown', function() use ($site_id, $secret_token, $bot_parameters, $status) {
+                // Read at shutdown rather than captured, so a settings change made earlier in this
+                // same request is honoured.
+                if (!$this->get_boolean_option('geoguru_llm_tracking_enabled', 1)) {
                     return;
                 }
-
-                $user_agent = isset($_SERVER['HTTP_USER_AGENT']) ? sanitize_text_field( wp_unslash ($_SERVER['HTTP_USER_AGENT'])) : '';
-                $bot_parameters = GeoGuru_Utils::detect_bot($user_agent);
-                if (!$bot_parameters['is_bot']) {
-                    $this->logger->debug('Request is not a bot, skipping log request', ['wp_hook' => current_action()]);
-                    return;
-                }
-                $log_data = [
+                $this->supabase_service->create_crawling_log($site_id, $secret_token, [
                     'bot_type' => sanitize_text_field($bot_parameters['bot_type']),
                     'bot_name' => sanitize_text_field($bot_parameters['bot_name']),
-                    'status' => 'success'
-                ];
-
-                // Check if LLM tracking is enabled for this request
-                $llm_tracking_enabled = $this->get_boolean_option('geoguru_llm_tracking_enabled', 1);
-                if ($llm_tracking_enabled) {
-                    $this->supabase_service->create_crawling_log($site_id, $secret_token, $log_data);
-                }
+                    'status'   => $status,
+                ]);
             });
-
-            // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- nonce is not required for this request
-            if (isset($_GET['llm_view']) && $_GET['llm_view'] == '1') {
-                $this->handle_llm_version_page();
-            } else {
-                // Display footer link with collected URLs
-                add_action('wp_footer', array($this, 'display_footer_links'));
-            }
         }
 
         public function handle_llm_version_page() {
@@ -400,13 +447,6 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
             // found the page falls through to normal WordPress rendering unharmed.
             add_filter('litespeed_can_optm', '__return_false');
 
-            // Check if automatic optimization is enabled
-            $automatic_optimization_enabled = $this->get_boolean_option('geoguru_automatic_optimization_enabled', 1);
-            if (!$automatic_optimization_enabled) {
-                $this->logger->debug('Automatic optimization is disabled, skipping LLM version page', ['wp_hook' => current_action()]);
-                return;
-            }
-            
             $optimized_content = $this->get_optimized_content();
 
             if (!$optimized_content) {
@@ -564,15 +604,7 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
                 return;
             }
 
-            // Check if automatic optimization is enabled
-            $automatic_optimization_enabled = $this->get_boolean_option('geoguru_automatic_optimization_enabled', 1);
-            if (!$automatic_optimization_enabled) {
-                $this->logger->debug('Automatic optimization is disabled, skipping interception', ['wp_hook' => current_action()]);
-                return;
-            }
-
-            $user_agent = isset($_SERVER['HTTP_USER_AGENT']) ? sanitize_text_field( wp_unslash ($_SERVER['HTTP_USER_AGENT'])) : '';
-            $bot_parameters = GeoGuru_Utils::detect_bot($user_agent);
+            $bot_parameters = $this->detect_current_bot();
             if (!$bot_parameters['is_bot']) {
                 $this->logger->debug('Request is not a bot, skipping interception', ['wp_hook' => current_action()]);
                 return;
@@ -581,7 +613,7 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
     
             $serving_optimized_content = $this->get_optimized_content();
 
-            add_filter('template_include', function($template) use ($serving_optimized_content, $site_id, $secret_token) {
+            add_filter('template_include', function($template) use ($serving_optimized_content) {
                 if ($serving_optimized_content) {
                     // SECURITY NOTE: Content is intentionally unescaped because:
                     // 1. Content is a complete HTML document that must be served as-is to preserve functionality
@@ -598,22 +630,10 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
                 return $template;
             }, PHP_INT_MAX);
 
-    
-            // After the response, log the crawl and trigger async optimization with the captured content
-            add_action('shutdown', function() use ($site_id, $secret_token, $serving_optimized_content, $bot_parameters) {
-                $log_data = [
-                    'bot_type' => sanitize_text_field($bot_parameters['bot_type']),
-                    'bot_name' => sanitize_text_field($bot_parameters['bot_name']),
-                    'status' => $serving_optimized_content ? 'success' : 'processing'
-                ];
-                
-                // Check if LLM tracking is enabled for this request
-                $llm_tracking_enabled = $this->get_boolean_option('geoguru_llm_tracking_enabled', 1);
-                if ($llm_tracking_enabled) {
-                    // TODO: check if it is possible to do this in the background
-                    $this->supabase_service->create_crawling_log($site_id, $secret_token, $log_data);
-                }
-            });
+
+            // 'processing' when the CDN had nothing for this URL yet. See the helper's note: this is
+            // the only branch that writes it, and it is load-bearing.
+            $this->log_bot_crawl_on_shutdown($bot_parameters, $serving_optimized_content ? 'success' : 'processing');
         }
         private function get_optimized_content() {
             $url = GeoGuru_Utils::get_current_full_url();
