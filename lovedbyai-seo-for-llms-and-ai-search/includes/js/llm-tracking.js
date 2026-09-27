@@ -13,7 +13,8 @@
         url: location.href,
         referer: document.referrer || '',
         utm_source: (new URLSearchParams(window.location.search)).get('utm_source') || '',
-        user_agent: navigator.userAgent || ''
+        user_agent: navigator.userAgent || '',
+        http_status: typeof cfg.httpStatus === 'number' ? cfg.httpStatus : null
     };
     var payload = JSON.stringify(data);
 
@@ -35,7 +36,8 @@
             url: data.url,
             referer: data.referer,
             utm_source: data.utm_source,
-            user_agent: data.user_agent
+            user_agent: data.user_agent,
+            http_status: data.http_status
         });
         fetch(cfg.fallbackUrl, {
             method: 'POST',

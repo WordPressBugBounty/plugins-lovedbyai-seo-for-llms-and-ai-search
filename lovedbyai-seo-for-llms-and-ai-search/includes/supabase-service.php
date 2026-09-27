@@ -390,9 +390,10 @@ if (!class_exists('GeoGuru_SupabaseService')) {
          * @param string $user_agent  User agent string
          * @param string $referer    Referer value
          * @param string $utm_source Normalized utm_source (e.g. chatgpt.com)
+         * @param int|null $http_status Status the page answered the visitor with, if known
          * @return array|false Response body as array on success, false on failure
          */
-        public function create_llm_source_event_via_edge($site_id, $secret_token, $url, $user_agent, $referer, $utm_source) {
+        public function create_llm_source_event_via_edge($site_id, $secret_token, $url, $user_agent, $referer, $utm_source, $http_status = null) {
             if (empty($this->supabase_url) || empty($this->supabase_anon_key)) {
                 $this->logger->error('Supabase URL or anon key not configured for LLM source event');
                 return false;
@@ -410,6 +411,7 @@ if (!class_exists('GeoGuru_SupabaseService')) {
                 'user_agent'   => $user_agent ?: 'Unknown',
                 'referer'      => $referer ?: 'Unknown',
                 'utm_source'   => $utm_source ?: 'Unknown',
+                'http_status'  => $http_status,
             );
 
             $headers = array(

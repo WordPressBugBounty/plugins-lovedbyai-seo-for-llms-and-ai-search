@@ -3,7 +3,7 @@
  * Plugin Name: LovedByAI - Generative Engine Optimization AI Search
  * Description: Automatically optimize your website to ensure it gets noticed by LLMs and AI search engines.
  * Plugin URI: https://lovedby.ai
- * Version: 2.0.0
+ * Version: 2.0.1
  * Author: LovedByAI
  * Author URI: https://lovedby.ai
  * Requires PHP: 7.1
@@ -1157,6 +1157,7 @@ function geoguru_rest_llm_source_event($request) {
     $referer = isset($json_params['referer']) ? esc_url_raw($json_params['referer']) : '';
     $utm_source = isset($json_params['utm_source']) ? sanitize_text_field($json_params['utm_source']) : '';
     $user_agent = isset($json_params['user_agent']) ? sanitize_text_field($json_params['user_agent']) : '';
+    $http_status = isset($json_params['http_status']) && is_int($json_params['http_status']) ? $json_params['http_status'] : null;
 
     $site_id = get_option('geoguru_site_id', '');
     $secret_token = get_option('geoguru_secret_token', '');
@@ -1182,7 +1183,7 @@ function geoguru_rest_llm_source_event($request) {
     }
 
     $supabase_service = GeoGuru_SupabaseService::get_instance();
-    $result = $supabase_service->create_llm_source_event_via_edge($site_id, $secret_token, $url, $user_agent, $referer, $utm_source);
+    $result = $supabase_service->create_llm_source_event_via_edge($site_id, $secret_token, $url, $user_agent, $referer, $utm_source, $http_status);
 
     if ($result === false) {
         return new WP_Error('tracking_failed', 'Failed to record event', array('status' => 502));

@@ -223,6 +223,26 @@ class GeoGuru_Utils {
     }
 
     /**
+     * HTTP status of the response this request is producing, or null when none can be read.
+     *
+     * A theme that renders its "not found" template with a 200 still counts as 404: the page
+     * does not exist either way. Any other code is kept as sent: a missing URL that WordPress or
+     * a redirect plugin forwards elsewhere is a redirect, not a 404.
+     *
+     * @return int|null
+     */
+    public static function current_http_status(): ?int {
+        $code = http_response_code();
+        if (!is_int($code) || $code < 100 || $code > 599) {
+            return null;
+        }
+        if ($code === 200 && function_exists('is_404') && is_404()) {
+            return 404;
+        }
+        return $code;
+    }
+
+    /**
      * Whether an `upgrader_process_complete` payload names the given plugin.
      *
      * WordPress core reports which plugin(s) were just updated under one of two different keys,

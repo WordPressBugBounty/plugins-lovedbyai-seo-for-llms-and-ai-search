@@ -370,6 +370,9 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
                 'proxyUrl'    => $proxy_url,
                 'fallbackUrl' => $fallback_url,
                 'siteId'      => $site_id,
+                // Known by the time scripts are enqueued: WordPress has resolved the query and set
+                // the status, so a visit that lands on a missing page reports 404.
+                'httpStatus'  => GeoGuru_Utils::current_http_status(),
             );
 
             wp_register_script('geoguru-llm-tracking', false, array(), GEOGURU_PLUGIN_VERSION, true);
@@ -425,10 +428,12 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
                 if (!$this->get_boolean_option('geoguru_llm_tracking_enabled', 1)) {
                     return;
                 }
+                // Read here, after the response is final, so redirects and 404s report their real code.
                 $this->supabase_service->create_crawling_log($site_id, $secret_token, [
-                    'bot_type' => sanitize_text_field($bot_parameters['bot_type']),
-                    'bot_name' => sanitize_text_field($bot_parameters['bot_name']),
-                    'status'   => $status,
+                    'bot_type'    => sanitize_text_field($bot_parameters['bot_type']),
+                    'bot_name'    => sanitize_text_field($bot_parameters['bot_name']),
+                    'status'      => $status,
+                    'http_status' => GeoGuru_Utils::current_http_status(),
                 ]);
             });
         }
