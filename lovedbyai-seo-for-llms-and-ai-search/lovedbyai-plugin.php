@@ -3,7 +3,7 @@
  * Plugin Name: LovedByAI - Generative Engine Optimization AI Search
  * Description: Automatically optimize your website to ensure it gets noticed by LLMs and AI search engines.
  * Plugin URI: https://lovedby.ai
- * Version: 2.0.1
+ * Version: 2.2.0
  * Author: LovedByAI
  * Author URI: https://lovedby.ai
  * Requires PHP: 7.1
@@ -42,7 +42,8 @@ $geoguru_required_files = [
     'includes/overlay-payload.php',
     'includes/overlay-rest.php',
     'includes/overlay-reader.php',
-    'includes/portal-bridge.php'
+    'includes/portal-bridge.php',
+    'includes/content-signals-service.php'
 ];
 
 foreach ($geoguru_required_files as $geoguru_file) {
@@ -764,6 +765,10 @@ function geoguru_register_rest_routes() {
     if (function_exists('geoguru_register_overlay_rest_routes')) {
         geoguru_register_overlay_rest_routes();
     }
+
+    if (function_exists('geoguru_register_content_signals_routes')) {
+        geoguru_register_content_signals_routes();
+    }
 }
 
 /**
@@ -1396,6 +1401,8 @@ function geoguru_plugin_uninstall() {
     delete_option('geoguru_indexnow_enabled');
     delete_option('geoguru_indexnow_key');
     delete_option('geoguru_settings_last_sync');
+
+    delete_transient('geoguru_content_signals');
 
     // Delete all iframe token options (one per token)
     global $wpdb;

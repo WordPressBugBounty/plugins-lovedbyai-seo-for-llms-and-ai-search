@@ -47,12 +47,12 @@ function geoguru_delivery_mirror_mechanisms() {
 }
 
 /**
- * The default pair: optimizations applied to the canonical page, and a CDN document behind the
- * link. This is the state the vast majority of sites already run, so it is what a site with nothing
- * else to go on gets, and what turning delivery back on restores.
+ * The default pair: the canonical page left as WordPress renders it, and a CDN document behind the
+ * link. This is what a site with nothing else to go on gets, including a fresh install before it
+ * has received any settings. Applying optimizations to the canonical page is opt-in.
  */
 function geoguru_delivery_default() {
-    return array('original' => 'page_replacement', 'mirror' => 'cdn_fetch');
+    return array('original' => 'off', 'mirror' => 'cdn_fetch');
 }
 
 /**

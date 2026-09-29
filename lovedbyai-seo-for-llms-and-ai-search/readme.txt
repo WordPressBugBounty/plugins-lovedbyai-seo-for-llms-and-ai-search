@@ -4,7 +4,7 @@ Tags: geo, generative engine optimization, ai search optimization, aeo, answer e
 Requires at least: 5.8
 Tested up to: 7.1
 Requires PHP: 7.1
-Stable tag: 2.0.1
+Stable tag: 2.2.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -99,6 +99,13 @@ Yes. A free account at lovedby.ai is required to use this plugin. The free tier 
 The plugin embeds a service management interface (portal app) via iframe for configuration, monitoring, and analytics. This interface is hosted on LovedByAI servers and requires an active account connection.
 
 ## Changelog
+
+### 2.2.0
+- Your dashboard can now suggest what to publish next, and which pages to deepen, based on your site's own content.
+- Suggestions to share your newest content now include case studies, projects and other content types, not only blog posts.
+
+### 2.1.0
+- New sites no longer apply optimizations to the page itself until that is turned on. The AI version page is unchanged.
 
 ### 2.0.1
 - AI visit reports now record whether the requested page exists, so visits to missing pages can be identified.

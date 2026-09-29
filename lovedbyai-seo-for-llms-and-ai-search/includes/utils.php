@@ -11,6 +11,23 @@ if (!defined('ABSPATH')) {
  */
 class GeoGuru_Utils {
     
+    // Falls back to $_SERVER: some hosts strip the Authorization header before WordPress sees it.
+    public static function read_bearer_token($request) {
+        $auth = is_object($request) && method_exists($request, 'get_header')
+            ? $request->get_header('authorization')
+            : '';
+        if (empty($auth) && isset($_SERVER['HTTP_AUTHORIZATION'])) {
+            $auth = sanitize_text_field(wp_unslash($_SERVER['HTTP_AUTHORIZATION']));
+        }
+        if (!is_string($auth) || $auth === '') {
+            return '';
+        }
+        if (stripos($auth, 'Bearer ') === 0) {
+            return trim(substr($auth, 7));
+        }
+        return '';
+    }
+
     /**
      * Get the current full URL including protocol, host, and request URI
      * @return string

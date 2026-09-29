@@ -55,7 +55,7 @@ class GeoGuru_SettingsSyncService {
     }
 
     public function handle_inbound_sync($request) {
-        $bearer = $this->get_bearer_token_from_request($request);
+        $bearer = GeoGuru_Utils::read_bearer_token($request);
         $stored = get_option('geoguru_secret_token', '');
         if ($stored === '' || $bearer === '' || !hash_equals($stored, $bearer)) {
             $this->logger->warning('Settings sync push rejected: invalid or missing bearer');
@@ -330,19 +330,5 @@ class GeoGuru_SettingsSyncService {
                 'changed' => $changed,
             );
         }
-    }
-
-    private function get_bearer_token_from_request($request) {
-        $auth = $request->get_header('authorization');
-        if (empty($auth) && isset($_SERVER['HTTP_AUTHORIZATION'])) {
-            $auth = sanitize_text_field(wp_unslash($_SERVER['HTTP_AUTHORIZATION']));
-        }
-        if (!is_string($auth) || $auth === '') {
-            return '';
-        }
-        if (stripos($auth, 'Bearer ') === 0) {
-            return trim(substr($auth, 7));
-        }
-        return '';
     }
 }

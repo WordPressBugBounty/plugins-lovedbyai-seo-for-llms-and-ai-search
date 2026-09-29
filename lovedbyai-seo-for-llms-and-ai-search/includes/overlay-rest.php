@@ -32,15 +32,11 @@ function geoguru_rest_overlay_service_permission_callback($request) {
         return false;
     }
 
-    $auth = $request->get_header('authorization');
-    if (empty($auth) && isset($_SERVER['HTTP_AUTHORIZATION'])) {
-        $auth = sanitize_text_field(wp_unslash($_SERVER['HTTP_AUTHORIZATION']));
-    }
-    if (empty($auth) || !preg_match('/Bearer\s+(\S+)/i', $auth, $m)) {
+    $bearer = GeoGuru_Utils::read_bearer_token($request);
+    if ($bearer === '') {
         $logger->warning('REST overlay-payload: missing bearer token');
         return false;
     }
-    $bearer = trim($m[1]);
     if (!hash_equals($stored_secret, $bearer)) {
         $logger->warning('REST overlay-payload: invalid bearer token');
         return false;

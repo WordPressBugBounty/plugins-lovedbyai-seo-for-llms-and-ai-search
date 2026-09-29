@@ -98,7 +98,7 @@ class GeoGuru_DiscoveryTriggerService {
         // (WP_Query posts_per_page => -1, all post meta) and push it to the
         // discovery service. hash_equals gives a constant-time comparison,
         // matching settings-sync-service.php / overlay-rest.php.
-        $bearer = $this->get_bearer_token_from_request($request);
+        $bearer = GeoGuru_Utils::read_bearer_token($request);
         $stored_secret = get_option('geoguru_secret_token', '');
         if ($stored_secret === '' || $bearer === '' || !hash_equals($stored_secret, $bearer)) {
             $this->logger->warning('Discovery trigger rejected: invalid or missing secret token');
@@ -151,27 +151,6 @@ class GeoGuru_DiscoveryTriggerService {
         }
     }
     
-    /**
-     * Extract the bearer token from the request's Authorization header.
-     * Mirrors GeoGuru_SettingsSyncService::get_bearer_token_from_request().
-     *
-     * @param WP_REST_Request $request
-     * @return string The token, or '' when absent/malformed.
-     */
-    private function get_bearer_token_from_request($request) {
-        $auth = $request->get_header('authorization');
-        if (empty($auth) && isset($_SERVER['HTTP_AUTHORIZATION'])) {
-            $auth = sanitize_text_field(wp_unslash($_SERVER['HTTP_AUTHORIZATION']));
-        }
-        if (!is_string($auth) || $auth === '') {
-            return '';
-        }
-        if (stripos($auth, 'Bearer ') === 0) {
-            return trim(substr($auth, 7));
-        }
-        return '';
-    }
-
     /**
      * Query WordPress for posts of a specific type
      */
