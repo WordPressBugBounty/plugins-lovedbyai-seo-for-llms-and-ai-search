@@ -3,7 +3,7 @@
  * Plugin Name: LovedByAI - Generative Engine Optimization AI Search
  * Description: Automatically optimize your website to ensure it gets noticed by LLMs and AI search engines.
  * Plugin URI: https://lovedby.ai
- * Version: 2.2.0
+ * Version: 2.2.1
  * Author: LovedByAI
  * Author URI: https://lovedby.ai
  * Requires PHP: 7.1
@@ -1613,21 +1613,21 @@ add_action('admin_menu', function() use ($lovedbyai_portal_slug, $lovedbyai_sett
         2 // Position (after Dashboard)
     );
 
-    // First submenu: "Overview" (loads portal app in iframe)
+    // First submenu: "Home" (loads portal app in iframe)
     add_submenu_page(
         $lovedbyai_portal_slug, // Parent slug
-        $display_name . ' Overview', // Page title
-        'Overview', // Menu title
+        $display_name . ' Home', // Page title
+        'Home', // Menu title
         'manage_options', // Capability
         $lovedbyai_portal_slug, // Menu slug (same as parent to make this default)
         'geoguru_render_portal_page' // Callback function
     );
 
-    // Add Settings submenu (loads WordpressSettings page in iframe)
+    // Add Advanced Settings submenu (loads WordpressSettings page in iframe)
     add_submenu_page(
         $lovedbyai_portal_slug, // Parent slug
-        $display_name . ' Settings', // Page title
-        'Settings', // Menu title
+        $display_name . ' Advanced Settings', // Page title
+        'Advanced Settings', // Menu title
         'manage_options', // Capability
         $lovedbyai_settings_slug, // Menu slug
         'geoguru_render_portal_settings_page' // Callback function
@@ -1789,7 +1789,7 @@ function geoguru_render_portal_page() {
     <?php
 }
 
-// Render the GeoGuru WordpressSettings page in an iframe (for the GeoGuru > Settings submenu)
+// Render the GeoGuru WordpressSettings page in an iframe (for the GeoGuru > Advanced Settings submenu)
 function geoguru_render_portal_settings_page() {
     geoguru_prune_expired_iframe_tokens();
 
