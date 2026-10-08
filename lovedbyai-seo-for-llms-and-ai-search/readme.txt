@@ -4,7 +4,7 @@ Tags: geo, generative engine optimization, ai search optimization, aeo, answer e
 Requires at least: 5.8
 Tested up to: 7.1
 Requires PHP: 7.1
-Stable tag: 2.2.2
+Stable tag: 2.2.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -99,6 +99,10 @@ Yes. A free account at lovedby.ai is required to use this plugin. The free tier 
 The plugin embeds a service management interface (portal app) via iframe for configuration, monitoring, and analytics. This interface is hosted on LovedByAI servers and requires an active account connection.
 
 ## Changelog
+
+### 2.2.3
+- Structured data now merges into an existing Organization when another plugin wraps its schema in a list, instead of adding a second one.
+- Fixed structured data merging when a page's schema graph holds a single item instead of a list.
 
 ### 2.2.2
 - Fixed the footer link to the AI version page collapsing into a narrow column of single words on some themes.

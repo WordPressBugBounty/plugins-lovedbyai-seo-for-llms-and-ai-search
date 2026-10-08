@@ -538,8 +538,21 @@ function geoguru_overlay_jsonld_merge($existing, $new) {
     if (!is_array($existing) || !is_array($new)) {
         return null;
     }
+    // Some plugins wrap their documents in a top-level array.
+    if ($existing === array_values($existing)) {
+        foreach ($existing as $i => $entry) {
+            $merged = geoguru_overlay_jsonld_merge($entry, $new);
+            if ($merged !== null) {
+                $existing[$i] = $merged;
+                return $existing;
+            }
+        }
+        return null;
+    }
     $has_graph = isset($existing['@graph']) && is_array($existing['@graph']);
-    $items = $has_graph ? array_values($existing['@graph']) : array($existing);
+    $graph = $has_graph ? $existing['@graph'] : null;
+    // @graph may hold a single node object instead of a list.
+    $items = $has_graph ? ($graph === array_values($graph) ? $graph : array($graph)) : array($existing);
 
     $new_types = geoguru_overlay_jsonld_root_types($new);
     $match = -1;
