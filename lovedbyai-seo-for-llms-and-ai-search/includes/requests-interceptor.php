@@ -537,7 +537,9 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
             $css .= 'visibility: visible;';
             $css .= 'position: absolute;';
             $css .= 'width: max-content;';
-            
+            // The container is 0px wide, so a theme's `a { max-width: 100% }` would collapse the link
+            $css .= 'max-width: none !important;';
+
             if (!empty($bg_color)) {
                 $css .= 'background-color: ' . esc_attr($bg_color) . ' !important;';
             }
