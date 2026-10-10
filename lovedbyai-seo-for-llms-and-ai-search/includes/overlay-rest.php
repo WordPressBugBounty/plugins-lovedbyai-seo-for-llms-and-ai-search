@@ -97,7 +97,10 @@ function geoguru_overlay_post_matches_url($post_id, $page_url) {
         return geoguru_overlay_url_query($permalink) === geoguru_overlay_url_query($page_url);
     }
 
-    return true;
+    // Off "/", the query is utm_* noise, with one exception: WPML's "language as a parameter" mode
+    // serves a translation at the original's path plus ?lang=he, as a different post. The path
+    // alone would accept either post's id for either URL.
+    return GeoGuru_Utils::extract_lang($permalink) === GeoGuru_Utils::extract_lang($page_url);
 }
 
 /**

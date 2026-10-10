@@ -662,12 +662,10 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
                 return null;
             }
             
-            // Hostname + pathname only; use path as-is (percent-encoded) and lowercase to match optimizer (Node URL.pathname is not decoded)
-            $parsed_url = wp_parse_url($url);
-            $hostname = isset($parsed_url['host']) ? strtolower($parsed_url['host']) : '';
-            $path_raw = $parsed_url['path'] ?? '/';
-            $pathname = $path_raw === '' ? '/' : strtolower($path_raw);
-            $normalized_path = $hostname . $pathname;
+            // The page key the optimizer names files by: lowercase host + path (percent-encoded, as
+            // Node's URL.pathname leaves it), plus a WPML ?lang= code. Other query parameters,
+            // ?llm_view=1 included, never change which page's copy is served.
+            $normalized_path = GeoGuru_Utils::page_key($url);
             
             // Generate the same hash as the optimizer service (SHA256 of normalized path)
             $route_hash = hash('sha256', $normalized_path);

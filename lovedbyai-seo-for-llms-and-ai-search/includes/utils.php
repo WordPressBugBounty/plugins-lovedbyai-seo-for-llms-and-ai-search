@@ -29,6 +29,46 @@ class GeoGuru_Utils {
     }
 
     /**
+     * The language a URL names through a `?lang=` parameter (WPML's "language as a parameter"
+     * mode), lowercased, or '' when it has none.
+     *
+     * Mirrors extractLangParam in @geoguru/common: only the first `lang` counts, and only when its
+     * value looks like a language code (`he`, `zh-hans`, `pt-br`). Parsed by hand because
+     * parse_str() keeps the LAST value of a repeated parameter.
+     */
+    public static function extract_lang($url) {
+        $query = wp_parse_url((string) $url, PHP_URL_QUERY);
+        if (!is_string($query) || $query === '') {
+            return '';
+        }
+        foreach (explode('&', $query) as $pair) {
+            $parts = explode('=', $pair, 2);
+            if (urldecode($parts[0]) !== 'lang') {
+                continue;
+            }
+            $value = strtolower(urldecode(isset($parts[1]) ? $parts[1] : ''));
+            // \z, not $: in PHP $ also matches before a trailing newline.
+            return preg_match('/^[a-z]{2,3}(?:[-_][a-z0-9]{2,8}){0,2}\z/', $value) ? $value : '';
+        }
+        return '';
+    }
+
+    /**
+     * The page key: lowercase host + lowercase path, plus `?lang=<code>` when the URL carries a valid
+     * `lang` parameter. The optimizer names a page's CDN file sha256(key), so this must match
+     * normalizeUrl in @geoguru/common byte for byte; tests/page-key-test.php runs both against the
+     * same cases. Keeping `lang` stops a WPML translation at /about/?lang=he sharing a file with
+     * /about/; every URL without one keeps the key it always had.
+     */
+    public static function page_key($url) {
+        $parsed = wp_parse_url((string) $url);
+        $host = isset($parsed['host']) ? strtolower($parsed['host']) : '';
+        $path = isset($parsed['path']) && $parsed['path'] !== '' ? strtolower($parsed['path']) : '/';
+        $lang = self::extract_lang($url);
+        return $host . $path . ($lang !== '' ? '?lang=' . $lang : '');
+    }
+
+    /**
      * Get the current full URL including protocol, host, and request URI
      * @return string
      */
