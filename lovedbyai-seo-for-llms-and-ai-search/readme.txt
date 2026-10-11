@@ -4,7 +4,7 @@ Tags: geo, generative engine optimization, ai search optimization, aeo, answer e
 Requires at least: 5.8
 Tested up to: 7.1
 Requires PHP: 7.1
-Stable tag: 2.3.0
+Stable tag: 2.3.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -99,6 +99,9 @@ Yes. A free account at lovedby.ai is required to use this plugin. The free tier 
 The plugin embeds a service management interface (portal app) via iframe for configuration, monitoring, and analytics. This interface is hosted on LovedByAI servers and requires an active account connection.
 
 ## Changelog
+
+### 2.3.1
+- Fixed the footer link to the AI version page reloading the same page on sites where Yoast SEO removes unregistered URL parameters.
 
 ### 2.3.0
 - Pages in every language of a WPML or Polylang site, and public content types that are hidden from the WordPress REST API, can now be found and optimized.

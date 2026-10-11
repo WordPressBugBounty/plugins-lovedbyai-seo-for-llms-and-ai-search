@@ -77,7 +77,7 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
          */
         private function build_llm_view_url() {
             $request_uri = isset($_SERVER['REQUEST_URI']) ? esc_url_raw(wp_unslash($_SERVER['REQUEST_URI'])) : '';
-            return add_query_arg('llm_view', '1', $this->strip_marketing_params($request_uri));
+            return add_query_arg(GEOGURU_LLM_VIEW_QUERY_ARG, '1', $this->strip_marketing_params($request_uri));
         }
 
         /**
@@ -272,8 +272,13 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
             // request to what this site delivers and where.
             $delivery = geoguru_get_delivery_settings();
             $this->llm_link_enabled = $delivery['mirror'] !== 'off';
+            if ($this->llm_link_enabled) {
+                // Yoast SEO's "Remove unregistered URL parameters" 301s ?llm_view=1 back to the
+                // clean URL before the mirror is served, so the footer link just reloads the page.
+                add_filter('Yoast\\WP\\SEO\\allowlist_permalink_vars', array($this, 'allow_llm_view_query_var'));
+            }
             // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only surface check, no nonce needed
-            $is_mirror_request = isset($_GET['llm_view']) && $_GET['llm_view'] == '1';
+            $is_mirror_request = isset($_GET[GEOGURU_LLM_VIEW_QUERY_ARG]) && $_GET[GEOGURU_LLM_VIEW_QUERY_ARG] == '1';
 
             // Serving a complete optimized document at the canonical URL. This path echoes its own
             // response for bots and must never be combined with the overlay, which buffers and
@@ -324,6 +329,15 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
             if ($this->llm_link_enabled) {
                 add_action('wp_footer', array($this, 'display_footer_links'));
             }
+        }
+
+        /**
+         * Keep llm_view out of Yoast SEO's URL-parameter cleanup.
+         */
+        public function allow_llm_view_query_var($allowed) {
+            $allowed = is_array($allowed) ? $allowed : array();
+            $allowed[] = GEOGURU_LLM_VIEW_QUERY_ARG;
+            return $allowed;
         }
 
         private function should_skip(): bool {

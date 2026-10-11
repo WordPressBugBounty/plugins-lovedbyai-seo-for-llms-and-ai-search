@@ -19,6 +19,11 @@ if (!defined('GEOGURU_DELIVERY_OPTION')) {
     define('GEOGURU_DELIVERY_OPTION', 'geoguru_optimization_delivery');
 }
 
+// The query arg that selects the mirror: /page/?llm_view=1.
+if (!defined('GEOGURU_LLM_VIEW_QUERY_ARG')) {
+    define('GEOGURU_LLM_VIEW_QUERY_ARG', 'llm_view');
+}
+
 /**
  * Mechanisms accepted on the canonical page.
  *

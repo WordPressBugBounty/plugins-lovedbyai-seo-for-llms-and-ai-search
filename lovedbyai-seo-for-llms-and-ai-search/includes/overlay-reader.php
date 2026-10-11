@@ -22,7 +22,7 @@ if (!defined('GEOGURU_OVERLAY_POST_META_KEY')) {
 function geoguru_overlay_register() {
     $delivery = geoguru_get_delivery_settings();
     // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only surface check, no nonce needed
-    $is_mirror_request = isset($_GET['llm_view']) && $_GET['llm_view'] == '1';
+    $is_mirror_request = isset($_GET[GEOGURU_LLM_VIEW_QUERY_ARG]) && $_GET[GEOGURU_LLM_VIEW_QUERY_ARG] == '1';
 
     if ($is_mirror_request) {
         // The mirror decides this render on its own axis, not the canonical page's (`original`).
