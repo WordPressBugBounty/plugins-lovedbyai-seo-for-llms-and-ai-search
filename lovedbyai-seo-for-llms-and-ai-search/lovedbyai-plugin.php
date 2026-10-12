@@ -3,7 +3,7 @@
  * Plugin Name: LovedByAI - Generative Engine Optimization AI Search
  * Description: Automatically optimize your website to ensure it gets noticed by LLMs and AI search engines.
  * Plugin URI: https://lovedby.ai
- * Version: 2.3.1
+ * Version: 2.3.2
  * Author: LovedByAI
  * Author URI: https://lovedby.ai
  * Requires PHP: 7.1
@@ -286,26 +286,33 @@ function geoguru_schedule_synced_settings_reconcile() {
  * @return string Route with a leading slash, e.g. '/geoguru/v1/settings'.
  */
 function geoguru_current_rest_route() {
-    $uri = isset($_SERVER['REQUEST_URI']) ? sanitize_text_field(wp_unslash($_SERVER['REQUEST_URI'])) : '';
-    if ($uri === '') {
+    // These entry points never serve REST, so a rest_route or /wp-json/ path on them is not a REST request.
+    if (is_admin() || wp_doing_cron() || (defined('XMLRPC_REQUEST') && XMLRPC_REQUEST)) {
         return '';
     }
 
-    $path = wp_parse_url($uri, PHP_URL_PATH);
+    // WordPress rejects a request whose POST and GET values differ, so it serves no route.
+    if (isset($_POST['rest_route'], $_GET['rest_route']) && $_POST['rest_route'] !== $_GET['rest_route']) {
+        return '';
+    }
+
+    // Same precedence as WordPress (POST, GET, path). Read decoded: sanitizing the raw URI strips an encoded %2F.
+    if (isset($_POST['rest_route'])) {
+        $route = is_string($_POST['rest_route']) ? sanitize_text_field(wp_unslash($_POST['rest_route'])) : '';
+        return $route === '' ? '' : '/' . ltrim($route, '/');
+    }
+    if (isset($_GET['rest_route'])) {
+        $route = is_string($_GET['rest_route']) ? sanitize_text_field(wp_unslash($_GET['rest_route'])) : '';
+        return $route === '' ? '' : '/' . ltrim($route, '/');
+    }
+
+    $uri = isset($_SERVER['REQUEST_URI']) ? sanitize_text_field(wp_unslash($_SERVER['REQUEST_URI'])) : '';
+    $path = $uri === '' ? null : wp_parse_url($uri, PHP_URL_PATH);
     if (is_string($path) && $path !== '') {
         $path = rawurldecode($path);
         $marker = strpos($path, '/wp-json/');
         if ($marker !== false) {
             return '/' . ltrim(substr($path, $marker + strlen('/wp-json/')), '/');
-        }
-    }
-
-    $query = wp_parse_url($uri, PHP_URL_QUERY);
-    if (is_string($query) && $query !== '') {
-        $params = array();
-        parse_str($query, $params);
-        if (isset($params['rest_route']) && is_string($params['rest_route']) && $params['rest_route'] !== '') {
-            return '/' . ltrim($params['rest_route'], '/');
         }
     }
 
