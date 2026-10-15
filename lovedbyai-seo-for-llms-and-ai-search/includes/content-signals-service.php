@@ -221,6 +221,18 @@ function geoguru_content_signals_link_and_title($post) {
     return $link;
 }
 
+// The large size, not the original upload, which can be several megabytes; evicts what the lookups cached.
+function geoguru_content_signals_featured_image($post) {
+    $thumbnail_id = (int) get_post_thumbnail_id($post);
+    $url = $thumbnail_id > 0 ? wp_get_attachment_image_url($thumbnail_id, 'large') : false;
+    wp_cache_delete($post->ID, 'post_meta');
+    if ($thumbnail_id > 0) {
+        wp_cache_delete($thumbnail_id, 'posts');
+        wp_cache_delete($thumbnail_id, 'post_meta');
+    }
+    return is_string($url) && $url !== '' ? $url : null;
+}
+
 // Lists IDs once in (modified, ID) order, then reads bodies a batch at a time. Full WP_Query
 // results are avoided because they cache every post they load.
 function geoguru_content_signals_scan($now, $budget_seconds = GEOGURU_CONTENT_SIGNALS_SCAN_BUDGET_SECONDS) {
@@ -347,6 +359,7 @@ function geoguru_content_signals_recent_posts() {
                     60,
                     ''
                 ),
+                'featured_image' => geoguru_content_signals_featured_image($post),
             );
         }
     }

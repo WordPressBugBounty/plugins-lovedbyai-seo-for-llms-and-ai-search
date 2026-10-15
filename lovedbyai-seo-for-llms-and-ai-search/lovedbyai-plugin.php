@@ -3,7 +3,7 @@
  * Plugin Name: LovedByAI - Generative Engine Optimization AI Search
  * Description: Automatically optimize your website to ensure it gets noticed by LLMs and AI search engines.
  * Plugin URI: https://lovedby.ai
- * Version: 2.3.2
+ * Version: 2.4.1
  * Author: LovedByAI
  * Author URI: https://lovedby.ai
  * Requires PHP: 7.1
@@ -1168,6 +1168,14 @@ function geoguru_rest_llm_source_event($request) {
     }
     if (!is_array($json_params)) {
         return new WP_Error('invalid_body', 'Invalid JSON body', array('status' => 400));
+    }
+
+    // Our script only ever sends strings. Anything else is a malformed request: reject it with a
+    // 400, because esc_url_raw() on an array is a PHP 8 TypeError that WordPress serves as a 500.
+    foreach (array('url', 'referer', 'utm_source', 'user_agent') as $field) {
+        if (isset($json_params[$field]) && !is_string($json_params[$field])) {
+            return new WP_Error('invalid_body', sprintf('%s must be a string', $field), array('status' => 400));
+        }
     }
 
     $url = isset($json_params['url']) ? esc_url_raw($json_params['url']) : '';
