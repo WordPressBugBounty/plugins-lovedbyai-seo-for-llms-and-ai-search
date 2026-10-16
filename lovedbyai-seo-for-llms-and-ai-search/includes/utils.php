@@ -326,4 +326,28 @@ class GeoGuru_Utils {
         }
         return in_array($plugin_basename, $updated_plugins, true);
     }
+
+    /**
+     * This plugin's Plugins-list entry with our branding swapped for the partner's.
+     *
+     * The header's Author URI and Plugin URI point at lovedby.ai, and WordPress links the author
+     * name to Author URI (and shows "Visit plugin site" for Plugin URI), so masking only the names
+     * still sent a white-label client to us. Both now go to the partner's site, or are dropped when
+     * the brand has none.
+     *
+     * @param array  $plugin_data One get_plugins() entry.
+     * @param string $name        Brand plugin name.
+     * @param string $author      Brand plugin author ('' hides "By ...").
+     * @param string $url         Brand website ('' removes the links).
+     * @return array
+     */
+    public static function mask_white_label_plugin_data($plugin_data, $name, $author, $url) {
+        $plugin_data['Name'] = $name;
+        $plugin_data['Title'] = $name;
+        $plugin_data['Author'] = $author;
+        $plugin_data['AuthorName'] = $author;
+        $plugin_data['AuthorURI'] = $url;
+        $plugin_data['PluginURI'] = $url;
+        return $plugin_data;
+    }
 }

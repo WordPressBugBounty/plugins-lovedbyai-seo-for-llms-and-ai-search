@@ -3,7 +3,7 @@
  * Plugin Name: LovedByAI - Generative Engine Optimization AI Search
  * Description: Automatically optimize your website to ensure it gets noticed by LLMs and AI search engines.
  * Plugin URI: https://lovedby.ai
- * Version: 2.4.1
+ * Version: 2.4.2
  * Author: LovedByAI
  * Author URI: https://lovedby.ai
  * Requires PHP: 7.1
@@ -84,7 +84,7 @@ add_filter('rest_pre_serve_request', 'geoguru_rest_cors_headers', PHP_INT_MAX, 4
 // Use late priority to ensure our headers take precedence over other plugins that set CORS headers.
 add_filter('rest_pre_dispatch', 'geoguru_handle_cors_preflight', PHP_INT_MAX, 3);
 
-// In white-label mode, replace the plugin name and author in the Plugins list with the brand display name and author.
+// In white-label mode, replace the plugin name, author and their links in the Plugins list with the brand's.
 add_filter('all_plugins', 'geoguru_filter_all_plugins_mask_brand_name');
 
 // PHP 7.1+ compatible class to replace enum (PHP 8.1+ feature)
@@ -1557,7 +1557,7 @@ function geoguru_get_plugin_name() {
 }
 
 /**
- * In white-label mode, replace the plugin name and author in the Plugins list with the brand display name and author.
+ * In white-label mode, replace the plugin name, author and their links in the Plugins list with the brand's.
  * Uses the all_plugins filter; branding from options (synced from DB by portal).
  * The plugin name is completely replaced (not just substring replacement).
  */
@@ -1567,15 +1567,14 @@ function geoguru_filter_all_plugins_mask_brand_name($all_plugins) {
     }
     $plugin_display_name = geoguru_get_plugin_name();
     $author = geoguru_get_plugin_author();
+    $url = get_option('geoguru_brand_details_url', '');
     foreach ($all_plugins as $plugin_file => $plugin_data) {
         if (!isset($plugin_data['Name']) || !is_string($plugin_data['Name'])) {
             continue;
         }
         // Only mask plugins that contain LovedByAI
         if (stripos($plugin_data['Name'], 'LovedByAI') !== false) {
-            $plugin_data['Name'] = $plugin_display_name;
-            $plugin_data['Author'] = $author;
-            $all_plugins[$plugin_file] = $plugin_data;
+            $all_plugins[$plugin_file] = GeoGuru_Utils::mask_white_label_plugin_data($plugin_data, $plugin_display_name, $author, $url);
         }
     }
     return $all_plugins;
