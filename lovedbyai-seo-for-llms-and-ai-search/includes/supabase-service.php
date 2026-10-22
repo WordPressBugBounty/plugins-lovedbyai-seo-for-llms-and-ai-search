@@ -129,7 +129,8 @@ if (!class_exists('GeoGuru_SupabaseService')) {
                 ],
                 'body' => json_encode([
                     'site_id' => $site_id,
-                    'secret_token' => $secret_token
+                    'secret_token' => $secret_token,
+                    'plugin_version' => defined('GEOGURU_PLUGIN_VERSION') ? GEOGURU_PLUGIN_VERSION : 'unknown'
                 ]),
                 'timeout' => 30
             ]);
