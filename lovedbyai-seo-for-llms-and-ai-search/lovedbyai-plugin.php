@@ -3,7 +3,7 @@
  * Plugin Name: LovedByAI - Generative Engine Optimization AI Search
  * Description: Automatically optimize your website to ensure it gets noticed by LLMs and AI search engines.
  * Plugin URI: https://lovedby.ai
- * Version: 2.4.2
+ * Version: 2.5.1
  * Author: LovedByAI
  * Author URI: https://lovedby.ai
  * Requires PHP: 7.1
@@ -33,6 +33,7 @@ $geoguru_required_files = [
     'includes/mixpanel-service.php',
     'includes/llms-txt-service.php',
     'includes/discovery-trigger-service.php',
+    'includes/post-events-service.php',
     'includes/indexnow-service.php',
     'includes/settings-sync-service.php',
     'includes/migration-manager.php',
@@ -235,6 +236,12 @@ function geoguru_insert_plugin_default_config() {
     }
     if (get_option('geoguru_indexnow_enabled', null) === null) {
         add_option('geoguru_indexnow_enabled', 1);
+    }
+    // The post events kill switch, seeded on so the per-request read comes from the autoloaded options
+    // instead of a query for a missing row. "=== null", not "!get_option()": a stored 0 is a site we
+    // switched off, and must stay off through every upgrade.
+    if (get_option(GeoGuru_PostEventsService::SETTING_OPTION, null) === null) {
+        add_option(GeoGuru_PostEventsService::SETTING_OPTION, 1, '', 'yes');
     }
     if (!get_option('geoguru_indexnow_service_url')) {
         $indexnow_service_url = $config->get('INDEXNOW_SERVICE_URL', 'https://api.lovedby.ai');
@@ -1421,6 +1428,7 @@ function geoguru_plugin_uninstall() {
     delete_option('geoguru_indexnow_enabled');
     delete_option('geoguru_indexnow_key');
     delete_option('geoguru_settings_last_sync');
+    delete_option(GeoGuru_PostEventsService::SETTING_OPTION);
 
     delete_transient('geoguru_content_signals');
 
@@ -1894,6 +1902,19 @@ add_action('plugins_loaded', function () {
         }
     }
 });
+
+/**
+ * Start sending post events (publish / update / remove) to the discovery service. plugins_loaded
+ * rather than init, so a post another plugin saves during init -- an importer, a scheduler -- is seen
+ * too. GeoGuru_PostEventsService::init() does nothing unless the plugin is active, the site is
+ * registered and the synced kill switch is on.
+ */
+function geoguru_start_post_events() {
+    if (class_exists('GeoGuru_PostEventsService')) {
+        GeoGuru_PostEventsService::get_instance()->init();
+    }
+}
+add_action('plugins_loaded', 'geoguru_start_post_events');
 
 // Initialize discovery trigger service (independent of llms.txt feature)
 add_action('init', function() {

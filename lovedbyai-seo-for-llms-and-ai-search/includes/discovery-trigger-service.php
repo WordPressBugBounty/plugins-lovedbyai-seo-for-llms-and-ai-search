@@ -2,6 +2,10 @@
 
 defined('ABSPATH') || exit;
 
+// The post-list route's excerpt and GMT-date helpers: the callback describes a post the way the
+// route and post events do. require_once, so the plugin's own include of this file is a no-op.
+require_once __DIR__ . '/discovery-posts-service.php';
+
 /**
  * GeoGuru Discovery Trigger Service
  * 
@@ -190,10 +194,11 @@ class GeoGuru_DiscoveryTriggerService {
         $post_data = array(
             'id' => $post->ID,
             'date' => mysql2date('c', $post->post_date, false),
-            'date_gmt' => mysql2date('c', $post->post_date_gmt, false),
+            // True UTC. mysql2date('c') labelled this GMT value with the site's offset.
+            'date_gmt' => geoguru_discovery_posts_gmt($post->post_date_gmt, $post->post_date),
             'guid' => array('rendered' => get_the_guid($post->ID)),
             'modified' => mysql2date('c', $post->post_modified, false),
-            'modified_gmt' => mysql2date('c', $post->post_modified_gmt, false),
+            'modified_gmt' => geoguru_discovery_posts_gmt($post->post_modified_gmt, $post->post_modified),
             'slug' => $post->post_name,
             'status' => $post->post_status,
             'type' => $post->post_type,
@@ -205,7 +210,8 @@ class GeoGuru_DiscoveryTriggerService {
                 'protected' => !empty($post->post_password)
             ),
             'excerpt' => array(
-                'rendered' => $post->post_excerpt ?: wp_trim_excerpt($post->post_content),
+                // Plain text, never the body: wp_trim_excerpt($text) returned a non-empty $text unchanged.
+                'rendered' => geoguru_discovery_posts_excerpt($post),
                 'protected' => false
             ),
             'author' => (int) $post->post_author,

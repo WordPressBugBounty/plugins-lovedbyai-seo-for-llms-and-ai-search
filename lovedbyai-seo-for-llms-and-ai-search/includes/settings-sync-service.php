@@ -35,6 +35,9 @@ class GeoGuru_SettingsSyncService {
             // key independently, so two flat keys would let a blob carrying only one of them leave a
             // live site running one target from a pushed value and the other from legacy derivation.
             'optimization_delivery' => array(GEOGURU_DELIVERY_OPTION, 'delivery'),
+            // Kill switch for post events (GeoGuru_PostEventsService::SETTING_OPTION). Absent means on,
+            // so a site only ever needs this key pushed to switch it off, or back on.
+            'send_post_events' => array('geoguru_send_post_events', 'bool'),
         );
     }
 

@@ -5,6 +5,8 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+require_once __DIR__ . '/serving-guard.php';
+
 if (!class_exists('GeoGuru_RequestsInterceptor')) {
     class GeoGuru_RequestsInterceptor {
         private static $instance = null;
@@ -417,13 +419,17 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
          * owner, and a crawler visit is worth reporting whether or not the page was optimized.
          *
          * $status is 'success' everywhere except the CDN-document branch, which reports
-         * 'processing' when it found nothing to serve. IMPORTANT: no other branch writes that
-         * value, which makes it the only signal telling us a site runs that mechanism -- nothing on
-         * our side records which mechanism a site is on. It looks incidental; it is not. Do not
-         * normalise it to 'success'.
+         * 'processing' when it found nothing to serve, and 'ignored' when WordPress does not serve
+         * the page at all (a 404, an unpublished post, a password form). IMPORTANT: no other branch
+         * writes either value, which makes 'processing' the only signal telling us a site runs that
+         * mechanism -- nothing on our side records which mechanism a site is on. It looks
+         * incidental; it is not. Do not normalise it to 'success'.
          *
-         * @param array  $bot_parameters From detect_current_bot(); the caller has confirmed is_bot.
-         * @param string $status
+         * A Closure is resolved at shutdown, for a status only known once the page has rendered (or
+         * redirected).
+         *
+         * @param array          $bot_parameters From detect_current_bot(); the caller has confirmed is_bot.
+         * @param string|Closure $status
          */
         private function log_bot_crawl_on_shutdown(array $bot_parameters, $status = 'success') {
             $site_id = get_option('geoguru_site_id', '');
@@ -442,11 +448,12 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
                 if (!$this->get_boolean_option('geoguru_llm_tracking_enabled', 1)) {
                     return;
                 }
+                $resolved_status = $status instanceof Closure ? $status() : $status;
                 // Read here, after the response is final, so redirects and 404s report their real code.
                 $this->supabase_service->create_crawling_log($site_id, $secret_token, [
                     'bot_type'    => sanitize_text_field($bot_parameters['bot_type']),
                     'bot_name'    => sanitize_text_field($bot_parameters['bot_name']),
-                    'status'      => $status,
+                    'status'      => $resolved_status,
                     'http_status' => GeoGuru_Utils::current_http_status(),
                 ]);
             });
@@ -478,6 +485,13 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
             add_action('template_redirect', function() use ($optimized_content) {
                 if (!$optimized_content) {
                     $this->logger->debug('Optimized content not found, returning original content', ['wp_hook' => current_action()]);    
+                    return;
+                }
+                // WordPress does not serve this page -- a 404, an unpublished post, a password form --
+                // so neither does the mirror: fall through to WordPress's own response instead of
+                // forcing a 200 over it with a stale copy.
+                if (geoguru_is_unservable_request()) {
+                    $this->logger->debug('Page not served by WordPress, LLM version not served', ['wp_hook' => current_action()]);
                     return;
                 }
                 $this->logger->debug('Displaying LLM version page', ['wp_hook' => current_action()]);
@@ -634,7 +648,20 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
     
             $serving_optimized_content = $this->get_optimized_content();
 
-            add_filter('template_include', function($template) use ($serving_optimized_content) {
+            // Set by template_include, which then owns the answer to "does WordPress serve this
+            // page": $decided says it ran, $guarded what it found. Read by the crawl log at shutdown.
+            $decided = false;
+            $guarded = false;
+
+            add_filter('template_include', function($template) use ($serving_optimized_content, &$decided, &$guarded) {
+                $decided = true;
+                // A 404, an unpublished post, a password form: WordPress is not serving this page, so
+                // neither is the CDN copy. Serving it anyway is how a trashed post, or the old URL of
+                // a renamed page, went on being served optimized.
+                if (geoguru_is_unservable_request()) {
+                    $guarded = true;
+                    return $template;
+                }
                 if ($serving_optimized_content) {
                     // SECURITY NOTE: Content is intentionally unescaped because:
                     // 1. Content is a complete HTML document that must be served as-is to preserve functionality
@@ -653,8 +680,18 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
 
 
             // 'processing' when the CDN had nothing for this URL yet. See the helper's note: this is
-            // the only branch that writes it, and it is load-bearing.
-            $this->log_bot_crawl_on_shutdown($bot_parameters, $serving_optimized_content ? 'success' : 'processing');
+            // the only branch that writes it, and it is load-bearing. 'ignored' when WordPress does
+            // not serve the page: a removed post is not waiting to be optimized. The guard is asked
+            // again at shutdown only when template_include never ran (a request that redirects):
+            // after a render, a theme's query_posts() without wp_reset_query() could have changed the
+            // queried object, so the answer template_include gave is the one that counts.
+            $this->log_bot_crawl_on_shutdown($bot_parameters, function () use (&$decided, &$guarded, $serving_optimized_content) {
+                $unservable = $decided ? $guarded : geoguru_is_unservable_request();
+                if ($unservable) {
+                    return 'ignored';
+                }
+                return $serving_optimized_content ? 'success' : 'processing';
+            });
         }
         private function get_optimized_content() {
             $url = GeoGuru_Utils::get_current_full_url();

@@ -14,6 +14,8 @@ if (!defined('ABSPATH')) {
 // file alone consumes, and requiring it locally keeps the standalone tests/overlay-merge-test.php
 // runnable without booting the plugin.
 require_once __DIR__ . '/schema-organization-types.php';
+// Same local-require reasoning: the overlay tests load this file without booting the plugin.
+require_once __DIR__ . '/serving-guard.php';
 
 if (!defined('GEOGURU_OVERLAY_POST_META_KEY')) {
     define('GEOGURU_OVERLAY_POST_META_KEY', '_geoguru_overlay_payload_v1');
@@ -127,6 +129,13 @@ function geoguru_overlay_envelope_from_meta($raw, $post_id) {
 }
 
 function geoguru_overlay_start_buffer() {
+    // Nothing of ours on a page WordPress itself does not serve: a 404, an unpublished post seen in
+    // a preview, or a password form -- where our optimized title and JSON-LD would describe content
+    // the visitor has not unlocked. The payload stays in post meta for when the post is public again.
+    if (geoguru_is_unservable_request()) {
+        return;
+    }
+
     // get_queried_object_id() is not post-scoped. On a term archive it returns the TERM id, and
     // feeding that to get_post_meta() below reads the payload of whichever POST happens to share
     // that id -- so a category archive can render an unrelated post's optimized title. Seen in a

@@ -4,7 +4,7 @@ Tags: ai seo, geo, aeo, llms.txt, generative engine optimization
 Requires at least: 5.8
 Tested up to: 7.1
 Requires PHP: 7.1
-Stable tag: 2.4.2
+Stable tag: 2.5.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -137,7 +137,7 @@ Yes. A free account at lovedby.ai is required to use this plugin. The free tier 
    - **Portal/App Interface** (app.lovedby.ai, app.geoguru.ai, portal.geoguru.ai): Service management dashboard and configuration interface
    - **CDN** (cdn.lovedby.ai, cdn.geoguru.ai): Content delivery network for serving optimized content files
    - Purpose: Core service backend for content optimization, data storage, analytics, and service management interface
-   - Data transmitted: Website content (for optimization), configuration settings, analytics data, crawling logs, optimized content files
+   - Data transmitted: Website content (for optimization), configuration settings, analytics data, crawling logs, optimized content files; and, when a post is published, updated or removed, its post id and type, address, status, language, title, a short plain-text excerpt, publish and modified dates, content length, sticky flag, the site's home address and languages, and change fingerprints (hashes of the post's fields)
    - Terms: https://www.lovedby.ai/terms-of-use
    - Privacy: https://www.lovedby.ai/privacy-policy
 
@@ -151,6 +151,14 @@ Yes. A free account at lovedby.ai is required to use this plugin. The free tier 
 The plugin embeds a service management interface (portal app) via iframe for configuration, monitoring, and analytics. This interface is hosted on LovedByAI servers and requires an active account connection.
 
 ## Changelog
+
+### 2.5.1
+- Pages you unpublish, password-protect, trash or delete stop being served in their optimized form.
+
+### 2.5.0
+- New and edited posts and pages reach your dashboard within minutes.
+- Pages you unpublish, password-protect, trash or delete leave your llms.txt.
+- Browsers and caches now refresh your llms.txt within an hour.
 
 ### 2.4.2
 - Minor fixes to how the plugin is listed on the Plugins page.

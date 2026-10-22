@@ -9,6 +9,10 @@ defined('ABSPATH') || exit;
  */
 class GeoGuru_LlmsTxtService {
     
+    // Short enough that a page removed from the generated file stops being listed by caches within
+    // the hour; the R2 copy behind it is regenerated within a minute of the change.
+    const CACHE_CONTROL = 'public, max-age=3600';
+
     private static $instance = null;
     private $logger;
     
@@ -247,7 +251,7 @@ class GeoGuru_LlmsTxtService {
 
         // Set proper headers
         header('Content-Type: text/plain; charset=utf-8');
-        header('Cache-Control: public, max-age=86400'); // Cache for 24 hours
+        header('Cache-Control: ' . self::CACHE_CONTROL);
         header('X-Content-Type-Options: nosniff');
         
         // Content is intentionally unescaped as it's plain text output that must be served as-is.

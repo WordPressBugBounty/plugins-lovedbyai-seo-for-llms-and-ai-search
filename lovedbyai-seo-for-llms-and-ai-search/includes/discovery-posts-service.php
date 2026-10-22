@@ -1,8 +1,11 @@
 <?php
 // GET /discovery/posts: every published post of every public, viewable type, in every language,
-// a page at a time, for the page-discovery service. Metadata only: no rendered body, no post meta.
+// a page at a time, for the page-discovery service. Metadata only: no rendered body and no post
+// meta value; fields=field_hashes (asked for by name only) adds one-way hashes of the raw fields.
 
 defined('ABSPATH') || exit;
+
+require_once __DIR__ . '/post-field-hashes.php';
 
 define('GEOGURU_DISCOVERY_POSTS_SCHEMA_VERSION', 1);
 define('GEOGURU_DISCOVERY_POSTS_DEFAULT_PER_PAGE', 200);
@@ -10,6 +13,8 @@ define('GEOGURU_DISCOVERY_POSTS_DEFAULT_PER_PAGE', 200);
 // geoguru_discovery_posts_load); without them a page of rows is cheap.
 define('GEOGURU_DISCOVERY_POSTS_MAX_PER_PAGE', 200);
 define('GEOGURU_DISCOVERY_POSTS_MAX_PER_PAGE_LIGHT', 1000);
+// field_hashes reads and hashes every meta key of every post on the page, and its synced patterns.
+define('GEOGURU_DISCOVERY_POSTS_MAX_PER_PAGE_HASHED', 100);
 define('GEOGURU_DISCOVERY_POSTS_EXCERPT_MAX_CHARS', 500);
 
 // Never listed, even when named: no front-end pages, and some hold private data (a published
@@ -51,6 +56,12 @@ define('GEOGURU_DISCOVERY_POSTS_FIELDS', array(
     'modified_gmt',
     'content_length',
     'sticky',
+));
+
+// Returned only when named in `fields`, never by default: heavy, and no caller of the default set
+// needs them. Each comes after every default field.
+define('GEOGURU_DISCOVERY_POSTS_OPT_IN_FIELDS', array(
+    'field_hashes',
 ));
 
 function geoguru_register_discovery_posts_routes() {
@@ -109,13 +120,17 @@ function geoguru_discovery_posts_valid_request_id($value) {
     return is_string($value) && preg_match('/^[A-Za-z0-9-]{8,64}\z/', $value) === 1;
 }
 
-/** Requested fields in response order; every field when none are named. Unknown names are ignored. */
+/**
+ * Requested fields in response order; every default field when none are named (never an opt-in
+ * one). Unknown names are ignored.
+ */
 function geoguru_discovery_posts_parse_fields($raw) {
     if (!is_string($raw) || trim($raw) === '') {
         return GEOGURU_DISCOVERY_POSTS_FIELDS;
     }
     $requested = array_map('trim', explode(',', $raw));
-    return array_values(array_intersect(GEOGURU_DISCOVERY_POSTS_FIELDS, $requested));
+    $known = array_merge(GEOGURU_DISCOVERY_POSTS_FIELDS, GEOGURU_DISCOVERY_POSTS_OPT_IN_FIELDS);
+    return array_values(array_intersect($known, $requested));
 }
 
 function geoguru_discovery_posts_rest_base($type) {
@@ -123,6 +138,20 @@ function geoguru_discovery_posts_rest_base($type) {
         return null;
     }
     return is_string($type->rest_base) && $type->rest_base !== '' ? $type->rest_base : $type->name;
+}
+
+/**
+ * Whether a type is listed when none are named: public, publicly viewable, and not denied. Post
+ * events report exactly these types, so an event and a walk agree on what a site's pages are.
+ *
+ * @param object|null $type A WP_Post_Type, or null for a type that is not registered.
+ * @return bool
+ */
+function geoguru_discovery_posts_type_is_listed($type) {
+    return is_object($type)
+        && !empty($type->public)
+        && !in_array($type->name, GEOGURU_DISCOVERY_POSTS_DENIED_TYPES, true)
+        && is_post_type_viewable($type);
 }
 
 /**
@@ -139,7 +168,7 @@ function geoguru_discovery_posts_resolve_types($raw) {
 
     if (!is_string($raw) || trim($raw) === '') {
         foreach (get_post_types(array('public' => true), 'objects') as $name => $type) {
-            if (in_array($name, GEOGURU_DISCOVERY_POSTS_DENIED_TYPES, true) || !is_post_type_viewable($type)) {
+            if (!geoguru_discovery_posts_type_is_listed($type)) {
                 continue;
             }
             $types[$name] = geoguru_discovery_posts_rest_base($type);
@@ -386,12 +415,13 @@ function geoguru_discovery_posts_languages($posts, $plugin) {
 /**
  * The manual excerpt, or the first 55 words of the body with blocks and shortcodes (and whatever
  * they enclose) removed. Plain text, never the_content: rendering would run every plugin's filters,
- * and a membership shortcode's protected content must not leave the site.
+ * and a membership shortcode's protected content must not leave the site -- from a manual excerpt
+ * either. Shared with post events, which describe a post the same way.
  */
 function geoguru_discovery_posts_excerpt($post) {
     $manual = trim((string) $post->post_excerpt);
     $text = $manual !== ''
-        ? wp_strip_all_tags($manual)
+        ? wp_strip_all_tags(strip_shortcodes($manual))
         : wp_trim_words(strip_shortcodes(excerpt_remove_blocks((string) $post->post_content)), 55);
     $text = trim(preg_replace('/\s+/', ' ', $text));
     return function_exists('mb_substr')
@@ -457,6 +487,10 @@ function geoguru_discovery_posts_item($post, $fields, $languages, $builder_lengt
             case 'sticky':
                 $item[$field] = is_sticky((int) $post->ID);
                 break;
+            case 'field_hashes':
+                // Opt-in only. The caller primes the page's meta first: one query, not one per post.
+                $item[$field] = geoguru_post_field_hashes($post);
+                break;
         }
     }
     return $item;
@@ -474,8 +508,14 @@ function geoguru_rest_discovery_posts($request) {
     geoguru_discovery_posts_mark_uncacheable();
 
     $fields = geoguru_discovery_posts_parse_fields($request->get_param('fields'));
-    $whole = in_array('excerpt', $fields, true) || in_array('url', $fields, true);
-    $max_per_page = $whole ? GEOGURU_DISCOVERY_POSTS_MAX_PER_PAGE : GEOGURU_DISCOVERY_POSTS_MAX_PER_PAGE_LIGHT;
+    $hashed = in_array('field_hashes', $fields, true);
+    // field_hashes hashes the raw body, so it needs the whole post too.
+    $whole = $hashed || in_array('excerpt', $fields, true) || in_array('url', $fields, true);
+    if ($hashed) {
+        $max_per_page = GEOGURU_DISCOVERY_POSTS_MAX_PER_PAGE_HASHED;
+    } else {
+        $max_per_page = $whole ? GEOGURU_DISCOVERY_POSTS_MAX_PER_PAGE : GEOGURU_DISCOVERY_POSTS_MAX_PER_PAGE_LIGHT;
+    }
     $per_page = (int) $request->get_param('per_page');
     $per_page = min($per_page > 0 ? $per_page : GEOGURU_DISCOVERY_POSTS_DEFAULT_PER_PAGE, $max_per_page);
     $after_id = max(0, (int) $request->get_param('after_id'));
@@ -492,6 +532,9 @@ function geoguru_rest_discovery_posts($request) {
     $plugin = geoguru_discovery_posts_multilingual_plugin();
     $languages = in_array('language', $fields, true) ? geoguru_discovery_posts_languages($posts, $plugin) : array();
     $builder_lengths = in_array('content_length', $fields, true) ? geoguru_discovery_posts_builder_lengths($ids) : array();
+    if ($hashed && $posts) {
+        update_meta_cache('post', array_keys($posts));
+    }
 
     $items = array();
     foreach ($ids as $id) {
