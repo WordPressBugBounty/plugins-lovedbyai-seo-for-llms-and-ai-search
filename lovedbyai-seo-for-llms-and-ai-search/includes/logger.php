@@ -50,9 +50,9 @@ class GeoGuru_Logger {
         
         // Use WordPress uploads directory instead of plugin directory
         // Plugin folders are deleted during upgrades, so we must store logs outside
-        $upload_dir = wp_upload_dir();
-        
-        if ($upload_dir['error']) {
+        $log_dir = $this->get_log_dir();
+
+        if ($log_dir === null) {
             // Don't write logs if uploads directory is not available
             $this->log_file = null;
             $this->max_file_size = 10 * 1024 * 1024; // 10MB
@@ -60,10 +60,7 @@ class GeoGuru_Logger {
             $this->min_log_level = get_option('geoguru_log_level', self::ERROR);
             return;
         }
-        
-        // Create plugin-specific folder in uploads directory
-        $log_dir = $upload_dir['basedir'] . '/lovedbyai';
-        
+
         // Ensure log directory exists
         if (!file_exists($log_dir)) {
             wp_mkdir_p($log_dir);
@@ -91,17 +88,13 @@ class GeoGuru_Logger {
             return;
         }
         
-        // Use WordPress uploads directory instead of plugin directory
-        $upload_dir = wp_upload_dir();
-        
-        if ($upload_dir['error']) {
+        $log_dir = $this->get_log_dir();
+
+        if ($log_dir === null) {
             // Cannot create security files if uploads directory is not available
             return;
         }
-        
-        // Create plugin-specific folder in uploads directory
-        $log_dir = $upload_dir['basedir'] . '/lovedbyai';
-        
+
         // Ensure log directory exists
         if (!file_exists($log_dir)) {
             wp_mkdir_p($log_dir);

@@ -3,7 +3,7 @@
  * Plugin Name: LovedByAI - Generative Engine Optimization AI Search
  * Description: Automatically optimize your website to ensure it gets noticed by LLMs and AI search engines.
  * Plugin URI: https://lovedby.ai
- * Version: 2.5.2
+ * Version: 2.5.4
  * Author: LovedByAI
  * Author URI: https://lovedby.ai
  * Requires PHP: 7.1
@@ -196,10 +196,6 @@ function geoguru_insert_plugin_default_config() {
             update_option('geoguru_supabase_url', esc_url_raw($supabase_url));
         }
     }
-    if (!get_option('geoguru_supabase_anon_key')) {
-        $supabase_anon_key = $config->get('SUPABASE_ANON_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlmdHplb3BtZGx5bWFyZWRxb3NiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQ3OTIxNjEsImV4cCI6MjA2MDM2ODE2MX0.cBsNTgKhVwW5yPPmNXTX6s0EELkpfYOxPUdeSUSQcnc');
-        update_option('geoguru_supabase_anon_key', $supabase_anon_key);
-    }
     if (!get_option('geoguru_fire_and_forget_worker_url')) {
         $fire_and_forget_worker_url = $config->get('FIRE_AND_FORGET_WORKER_URL', 'https://api.lovedby.ai/fire-and-forget');
         update_option('geoguru_fire_and_forget_worker_url', $fire_and_forget_worker_url);
@@ -224,9 +220,6 @@ function geoguru_insert_plugin_default_config() {
     }
     if (!get_option('geoguru_llms_txt_enabled')) {
         update_option('geoguru_llms_txt_enabled', 1);
-    }
-    if (!get_option('geoguru_llms_txt_config')) {
-        update_option('geoguru_llms_txt_config', array());
     }
     if (!get_option('geoguru_discovery_service_url')) {
         $discovery_service_url = $config->get('DISCOVERY_SERVICE_URL', 'https://api.lovedby.ai');

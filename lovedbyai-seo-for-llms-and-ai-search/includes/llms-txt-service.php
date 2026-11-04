@@ -40,13 +40,6 @@ class GeoGuru_LlmsTxtService {
         add_filter('redirect_canonical', array($this, 'prevent_llms_txt_redirect'), 10, 2);
         // Handle the llms.txt request
         add_action('template_redirect', array($this, 'handle_llms_txt_request'));
-        // Add AJAX handlers for portal app
-        add_action('wp_ajax_geoguru_get_llms_txt', array($this, 'ajax_get_llms_txt'));
-        add_action('wp_ajax_geoguru_regenerate_llms_txt', array($this, 'ajax_regenerate_llms_txt'));
-        
-        // Add CORS headers for AJAX requests
-        add_action('wp_ajax_geoguru_get_llms_txt', 'geoguru_add_cors_headers', 1);
-        add_action('wp_ajax_geoguru_regenerate_llms_txt', 'geoguru_add_cors_headers', 1);
     }
     
     /**
@@ -594,7 +587,7 @@ class GeoGuru_LlmsTxtService {
      * Get llms.txt configuration
      */
     public function get_config() {
-        $defaults = array(
+        return array(
             'enabled' => false,
             'site_name' => get_bloginfo('name'),
             'site_description' => get_bloginfo('description'),
@@ -602,86 +595,6 @@ class GeoGuru_LlmsTxtService {
             'max_pages_per_section' => 20,
             'post_types' => array('post', 'page')
         );
-        
-        $config = get_option('geoguru_llms_txt_config', array());
-        
-        return array_merge($defaults, $config);
-    }
-    
-    /**
-     * Update llms.txt configuration
-     */
-    public function update_config($new_config) {
-        $current_config = $this->get_config();
-        $updated_config = array_merge($current_config, $new_config);
-        
-        update_option('geoguru_llms_txt_config', $updated_config);
-        
-        // Clear cache when config changes
-        $this->clear_cache();
-        
-        $this->logger->info('llms.txt configuration updated', $new_config);
-        
-        return true;
-    }
-    
-    // AJAX Handlers for Portal App Integration
-    
-    /**
-     * AJAX handler to get llms.txt content
-     */
-    public function ajax_get_llms_txt() {
-        if (!isset($_REQUEST['nonce']) || !wp_verify_nonce(sanitize_text_field( wp_unslash ($_REQUEST['nonce'])), 'geoguru_nonce')) {
-            wp_die('Security check failed');
-        }
-        
-        if (!current_user_can('manage_options')) {
-            wp_die('Insufficient permissions');
-        }
-        
-        $content = $this->get_cached_llms_txt();
-        
-        if ($content === false) {
-            $content = $this->generate_llms_txt();
-        }
-        
-        if ($content === false) {
-            wp_send_json_error(array('message' => 'Failed to generate llms.txt content'));
-            return;
-        }
-        
-        wp_send_json_success(array(
-            'content' => $content,
-            'url' => get_site_url() . '/llms.txt',
-            'enabled' => $this->is_enabled()
-        ));
-    }
-    
-    /**
-     * AJAX handler to regenerate llms.txt
-     */
-    public function ajax_regenerate_llms_txt() {
-        if (!isset($_REQUEST['nonce']) || !wp_verify_nonce(sanitize_text_field( wp_unslash ($_REQUEST['nonce'])), 'geoguru_nonce')) {
-            wp_die('Security check failed');
-        }
-        
-        if (!current_user_can('manage_options')) {
-            wp_die('Insufficient permissions');
-        }
-        
-        // Clear cache and regenerate
-        $this->clear_cache();
-        $content = $this->generate_llms_txt();
-        
-        if ($content === false) {
-            wp_send_json_error(array('message' => 'Failed to regenerate llms.txt content'));
-            return;
-        }
-        
-        wp_send_json_success(array(
-            'content' => $content,
-            'message' => 'llms.txt regenerated successfully'
-        ));
     }
 }
 

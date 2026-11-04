@@ -11,18 +11,16 @@ if (!class_exists('GeoGuru_SupabaseService')) {
     class GeoGuru_SupabaseService {
         private static $instance = null;
         private $supabase_url;
-        private $supabase_anon_key;
         private $fire_and_forget_worker_url;
         private $logger;
 
         private function __construct() {
             $this->logger = GeoGuru_Logger::get_instance();
             $this->supabase_url = get_option('geoguru_supabase_url');
-            $this->supabase_anon_key = get_option('geoguru_supabase_anon_key');
             $this->fire_and_forget_worker_url = get_option('geoguru_fire_and_forget_worker_url');
             
-            if (empty($this->supabase_url) || empty($this->supabase_anon_key) || empty($this->fire_and_forget_worker_url)) {
-                $this->logger->error('Supabase URL or anon key or fire and forget worker URL not configured');
+            if (empty($this->supabase_url) || empty($this->fire_and_forget_worker_url)) {
+                $this->logger->error('Supabase URL or fire and forget worker URL not configured');
             } else {
                 $this->logger->debug('Supabase service initialized', [
                     'url' => $this->supabase_url
@@ -45,7 +43,7 @@ if (!class_exists('GeoGuru_SupabaseService')) {
          * @return bool True if credentials exist, false otherwise
          */
         public function verify_website_credentials($site_id, $secret_token) {
-            if (empty($this->supabase_url) || empty($this->supabase_anon_key)) {
+            if (empty($this->supabase_url)) {
                 $this->logger->error('Supabase not configured properly for verification');
                 return false;
             }
@@ -58,8 +56,6 @@ if (!class_exists('GeoGuru_SupabaseService')) {
             ];
 
             $headers = [
-                'apikey' => $this->supabase_anon_key,
-                'Authorization' => 'Bearer ' . $this->supabase_anon_key,
                 'Content-Type' => 'application/json'
             ];
 
@@ -116,15 +112,13 @@ if (!class_exists('GeoGuru_SupabaseService')) {
          * @return array|null Settings map when credentials are valid, null on invalid creds or error
          */
         public function get_synced_settings($site_id, $secret_token) {
-            if (empty($this->supabase_url) || empty($this->supabase_anon_key)) {
+            if (empty($this->supabase_url)) {
                 return null;
             }
 
             $settings_url = $this->supabase_url . '/functions/v1/get-website-settings';
             $response = wp_remote_post($settings_url, [
                 'headers' => [
-                    'apikey' => $this->supabase_anon_key,
-                    'Authorization' => 'Bearer ' . $this->supabase_anon_key,
                     'Content-Type' => 'application/json'
                 ],
                 'body' => json_encode([
@@ -163,7 +157,7 @@ if (!class_exists('GeoGuru_SupabaseService')) {
                 return false;
             }
 
-            if (empty($this->supabase_url) || empty($this->supabase_anon_key)) {
+            if (empty($this->supabase_url)) {
                 $this->logger->error('Supabase not configured properly for set_website_status');
                 return false;
             }
@@ -181,8 +175,6 @@ if (!class_exists('GeoGuru_SupabaseService')) {
             ));
 
             $headers = array(
-                'apikey' => $this->supabase_anon_key,
-                'Authorization' => 'Bearer ' . $this->supabase_anon_key,
                 'Content-Type' => 'application/json',
             );
 
@@ -299,89 +291,6 @@ if (!class_exists('GeoGuru_SupabaseService')) {
         }
 
         /**
-         * Create LLM source event log entry via Fire and Forget Worker
-         * Logs requests that come with specific utm_source parameters (e.g., chatgpt.com)
-         *
-         * @param string $site_id The site ID
-         * @param string $secret_token The secret token for authentication
-         * @param array $log_data Additional log data
-         * @return array|false The created log record or false on failure
-         */
-        public function create_llm_source_event($site_id, $secret_token, $log_data = []) {
-            if (empty($this->fire_and_forget_worker_url)) {
-                $this->logger->error('Fire and forget worker URL not configured properly for LLM source event log');
-                return false;
-            }
-
-            if (empty($site_id) || empty($secret_token)) {
-                $this->logger->error('Site ID and secret token are required for LLM source event log');
-                return false;
-            }
-
-            $edge_function_url = $this->fire_and_forget_worker_url;
-            
-            // Build base data with defaults
-            // Priority: log_data['utm_source'] > $_GET['utm_source'] > 'unknown'
-            // This allows referer-based detection to pass the detected source via log_data['utm_source']
-            $data = [
-                'function_name' => 'create-llm-source-event',
-                'function_params' => array_merge([
-                    'site_id' => $site_id,
-                    'secret_token' => $secret_token,
-                    'url' => GeoGuru_Utils::get_current_full_url(),
-                    'user_agent' => isset($_SERVER['HTTP_USER_AGENT']) ? sanitize_text_field( wp_unslash($_SERVER['HTTP_USER_AGENT'])) : 'Unknown'
-                ], 
-                $log_data)
-            ];
-
-            $headers = [
-                'Content-Type' => 'application/json'
-            ];
-
-            $this->logger->info('Creating LLM source event log entry via Fire and Forget Worker', [
-                'function_url' => $edge_function_url,
-                'site_id' => substr($site_id, 0, 8) . '...',
-                'url' => $data['function_params']['url'] ?? null,
-                'utm_source' => $data['function_params']['utm_source'] ?? null,
-                'referer' => $data['function_params']['referer'] ?? null
-            ]);
-
-            $response = wp_remote_post($edge_function_url, [
-                'headers' => $headers,
-                'body' => json_encode($data),
-                'timeout' => 30
-            ]);
-
-            if (is_wp_error($response)) {
-                $this->logger->error('WordPress HTTP Error during LLM source event log creation', [
-                    'error' => $response->get_error_message()
-                ]);
-                return false;
-            }
-
-            $response_code = wp_remote_retrieve_response_code($response);
-            $response_body = wp_remote_retrieve_body($response);
-            
-            $this->logger->debug('LLM source event log creation response', [
-                'response_code' => $response_code
-            ]);
-
-            if ($response_code !== 202) {
-                $this->logger->error('LLM source event log creation failed', [
-                    'response_code' => $response_code,
-                    'response_body' => $response_body
-                ]);
-                return;
-            }
-            
-            $this->logger->info('LLM source event log created successfully via Fire and Forget Worker', [
-                'url' => $data['function_params']['url'] ?? null,
-                'utm_source' => $data['function_params']['utm_source'] ?? null,
-                'referer' => $data['function_params']['referer'] ?? null
-            ]);
-        }
-
-        /**
          * Create LLM source event by calling the Supabase edge function directly with flat JSON.
          * Used by the plugin proxy (client-side tracking flow); no fire-and-forget worker.
          *
@@ -395,8 +304,8 @@ if (!class_exists('GeoGuru_SupabaseService')) {
          * @return array|false Response body as array on success, false on failure
          */
         public function create_llm_source_event_via_edge($site_id, $secret_token, $url, $user_agent, $referer, $utm_source, $http_status = null) {
-            if (empty($this->supabase_url) || empty($this->supabase_anon_key)) {
-                $this->logger->error('Supabase URL or anon key not configured for LLM source event');
+            if (empty($this->supabase_url)) {
+                $this->logger->error('Supabase URL not configured for LLM source event');
                 return false;
             }
             if (empty($site_id) || empty($secret_token)) {
@@ -416,8 +325,6 @@ if (!class_exists('GeoGuru_SupabaseService')) {
             );
 
             $headers = array(
-                'apikey'        => $this->supabase_anon_key,
-                'Authorization' => 'Bearer ' . $this->supabase_anon_key,
                 'Content-Type'  => 'application/json',
             );
 

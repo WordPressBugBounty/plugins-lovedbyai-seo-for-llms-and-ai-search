@@ -220,30 +220,6 @@ class GeoGuru_Utils {
     }
     
     /**
-     * Sanitize a string for logging (truncate and remove sensitive data)
-     * @param string $data The data to sanitize
-     * @param int $max_length Maximum length to keep
-     * @return string
-     */
-    public static function sanitize_for_logging($data, $max_length = 200) {
-        if (empty($data)) {
-            return 'empty';
-        }
-        
-        // Remove sensitive patterns (basic implementation)
-        $data = preg_replace('/[a-f0-9]{32,}/', '[REDACTED_TOKEN]', $data);
-        $data = preg_replace('/password[=:]\s*[^\s&]+/i', 'password=[REDACTED]', $data);
-        $data = preg_replace('/token[=:]\s*[^\s&]+/i', 'token=[REDACTED]', $data);
-        
-        // Truncate if too long
-        if (strlen($data) > $max_length) {
-            $data = substr($data, 0, $max_length) . '...';
-        }
-        
-        return $data;
-    }
-    
-    /**
      * Validate hex color format
      * 
      * @param string $color Hex color string (e.g., '#FFFFFF') or empty string
