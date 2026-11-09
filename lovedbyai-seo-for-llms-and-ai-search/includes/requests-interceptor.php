@@ -6,6 +6,7 @@ if (!defined('ABSPATH')) {
 }
 
 require_once __DIR__ . '/serving-guard.php';
+require_once __DIR__ . '/webmcp-settings.php';
 
 if (!class_exists('GeoGuru_RequestsInterceptor')) {
     class GeoGuru_RequestsInterceptor {
@@ -261,6 +262,10 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
                 add_action('wp_enqueue_scripts', array($this, 'enqueue_llm_tracking_script'));
             }
 
+            if ($this->get_boolean_option('geoguru_webmcp_enabled', 0) && !empty($site_id) && !empty($secret_token) && self::webmcp_assets_base() !== '') {
+                add_action('wp_enqueue_scripts', array($this, 'enqueue_webmcp_script'));
+            }
+
             // Check if plugin is still active
             if (!get_option('geoguru_plugin_active', true)) {
                 $this->logger->debug('Plugin deactivated, skipping interception', ['wp_hook' => current_action()]);
@@ -402,6 +407,42 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
             if ($script !== '') {
                 wp_add_inline_script('geoguru-llm-tracking', $script);
             }
+        }
+
+        public static function webmcp_assets_base() {
+            $url = (string) get_option('geoguru_webmcp_assets_url', '');
+            return $url === '' ? '' : rtrim($url, '/') . '/';
+        }
+
+        public function enqueue_webmcp_script() {
+            $config = array(
+                'proxyUrl'   => rest_url('geoguru/v1/webmcp-event'),
+                'restRoot'   => rest_url(),
+                'assetsBase' => self::webmcp_assets_base(),
+                'disabledTools' => geoguru_webmcp_disabled_tools(),
+            );
+
+            add_filter('wp_inline_script_attributes', array($this, 'webmcp_module_attribute'), 10, 2);
+            wp_register_script('geoguru-webmcp', false, array(), GEOGURU_PLUGIN_VERSION, true);
+            wp_enqueue_script('geoguru-webmcp');
+            wp_add_inline_script(
+                'geoguru-webmcp',
+                'window.geoguru_webmcp = ' . wp_json_encode($config) . ';',
+                'before'
+            );
+            $script = GeoGuru_Utils::inline_js('webmcp');
+            if ($script !== '') {
+                wp_add_inline_script('geoguru-webmcp', $script);
+            }
+        }
+
+        // The loader uses import(), so it is printed as a module. Only the script itself:
+        // the config before it stays a classic script that sets the global first.
+        public function webmcp_module_attribute($attributes, $javascript) {
+            if (is_array($attributes) && isset($attributes['id']) && $attributes['id'] === 'geoguru-webmcp-js-after') {
+                $attributes['type'] = 'module';
+            }
+            return $attributes;
         }
 
         /**

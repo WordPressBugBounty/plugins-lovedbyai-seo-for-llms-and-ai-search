@@ -2,6 +2,8 @@
 
 defined('ABSPATH') || exit;
 
+require_once __DIR__ . '/webmcp-settings.php';
+
 class GeoGuru_SettingsSyncService {
 
     // The value each setting last took from a synced blob, hashed and keyed by setting, so a re-send
@@ -38,6 +40,8 @@ class GeoGuru_SettingsSyncService {
             // Kill switch for post events (GeoGuru_PostEventsService::SETTING_OPTION). Absent means on,
             // so a site only ever needs this key pushed to switch it off, or back on.
             'send_post_events' => array('geoguru_send_post_events', 'bool'),
+            'webmcp_enabled' => array('geoguru_webmcp_enabled', 'bool'),
+            'webmcp_disabled_tools' => array(GEOGURU_WEBMCP_DISABLED_TOOLS_OPTION, 'tool_names'),
         );
     }
 
@@ -184,6 +188,13 @@ class GeoGuru_SettingsSyncService {
                     break;
                 case 'int':
                     $value = (int) $value;
+                    break;
+                case 'tool_names':
+                    if (!is_array($value)) {
+                        $rejected[] = $key;
+                        continue 2;
+                    }
+                    $value = geoguru_webmcp_sanitize_tool_names($value);
                     break;
             }
 

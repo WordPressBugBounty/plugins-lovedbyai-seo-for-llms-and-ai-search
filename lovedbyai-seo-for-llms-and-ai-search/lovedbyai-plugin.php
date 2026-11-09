@@ -3,12 +3,11 @@
  * Plugin Name: LovedByAI - Generative Engine Optimization AI Search
  * Description: Automatically optimize your website to ensure it gets noticed by LLMs and AI search engines.
  * Plugin URI: https://lovedby.ai
- * Version: 2.5.4
+ * Version: 2.5.5
  * Author: LovedByAI
  * Author URI: https://lovedby.ai
  * Requires PHP: 7.1
  * Requires at least: 5.8
- * Tested up to: 7.1
  * License: GPLv2 or later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
  * 
@@ -27,6 +26,7 @@ $geoguru_required_files = [
     'includes/utils.php',
     'includes/logger.php',
     'includes/delivery-settings.php',
+    'includes/webmcp-settings.php',
     'includes/requests-interceptor.php',
     'includes/config-service.php',
     'includes/supabase-service.php',
@@ -204,6 +204,12 @@ function geoguru_insert_plugin_default_config() {
         $optimized_content_cdn_url = $config->get('OPTIMIZED_CONTENT_CDN_URL', 'https://cdn.lovedby.ai');
         update_option('geoguru_optimized_content_cdn_url', $optimized_content_cdn_url);
     }
+    if (!get_option('geoguru_webmcp_assets_url')) {
+        $webmcp_assets_url = $config->get('WEBMCP_ASSETS_URL', 'https://yftzeopmdlymaredqosb.supabase.co/storage/v1/object/public/webmcp/');
+        if (filter_var($webmcp_assets_url, FILTER_VALIDATE_URL)) {
+            update_option('geoguru_webmcp_assets_url', esc_url_raw($webmcp_assets_url));
+        }
+    }
     if (!get_option('geoguru_llm_tracking_enabled')) {
         update_option('geoguru_llm_tracking_enabled', 1);
     }
@@ -350,6 +356,7 @@ function geoguru_is_public_rest_route($route) {
     $public = array(
         '/geoguru/v1/reachability',
         '/geoguru/v1/llm-source-event',
+        '/geoguru/v1/webmcp-event',
     );
     return in_array($route, $public, true);
 }
@@ -760,6 +767,12 @@ function geoguru_register_rest_routes() {
         'permission_callback' => '__return_true',
     ));
 
+    register_rest_route('geoguru/v1', '/webmcp-event', array(
+        'methods' => 'POST',
+        'callback' => 'geoguru_rest_webmcp_event',
+        'permission_callback' => '__return_true',
+    ));
+
     // GET /wp-json/geoguru/v1/reachability — public probe for backend services (WAF / connectivity checks)
     $reachability_routes = array('/reachability', '/reachability/');
     foreach ($reachability_routes as $reachability_path) {
@@ -889,6 +902,9 @@ function geoguru_rest_get_settings($request) {
         'llms_txt_enabled' => (bool)get_option('geoguru_llms_txt_enabled', 1),
         'indexnow_enabled' => (bool)get_option('geoguru_indexnow_enabled', 1),
         'indexnow_key' => sanitize_text_field(get_option('geoguru_indexnow_key', '')),
+        'webmcp_enabled' => (bool) get_option('geoguru_webmcp_enabled', 0),
+        'webmcp_disabled_tools' => geoguru_webmcp_disabled_tools(),
+        'webmcp_assets_url' => GeoGuru_RequestsInterceptor::webmcp_assets_base(),
         'llm_version_settings' => get_option('geoguru_llm_version_settings', array()),
         'wp_debug' => defined('WP_DEBUG') && WP_DEBUG,
         'site_url' => esc_url_raw(get_site_url())
@@ -923,6 +939,11 @@ function geoguru_rest_update_settings($request) {
     $log_level = isset($json_params['log_level']) ? sanitize_text_field($json_params['log_level']) : '';
     $llms_txt_enabled = isset($json_params['llms_txt_enabled']) ? filter_var($json_params['llms_txt_enabled'], FILTER_VALIDATE_BOOLEAN) : null;
     $indexnow_enabled = isset($json_params['indexnow_enabled']) ? (filter_var($json_params['indexnow_enabled'], FILTER_VALIDATE_BOOLEAN) ? 1 : 0) : null;
+    $webmcp_enabled = isset($json_params['webmcp_enabled']) ? (filter_var($json_params['webmcp_enabled'], FILTER_VALIDATE_BOOLEAN) ? 1 : 0) : null;
+    $webmcp_disabled_tools = array_key_exists('webmcp_disabled_tools', $json_params) ? $json_params['webmcp_disabled_tools'] : null;
+    if ($webmcp_disabled_tools !== null && !is_array($webmcp_disabled_tools)) {
+        return new WP_Error('invalid_webmcp_disabled_tools', 'webmcp_disabled_tools must be an array of tool names', array('status' => 400));
+    }
     $indexnow_regenerate = ! empty($json_params['indexnow_regenerate']) && filter_var($json_params['indexnow_regenerate'], FILTER_VALIDATE_BOOLEAN);
     $llm_version_settings = isset($json_params['llm_version_settings']) ? $json_params['llm_version_settings'] : null;
     // White-label / brand (plugin branding from DB)
@@ -934,7 +955,7 @@ function geoguru_rest_update_settings($request) {
     $brand_details_url = isset($json_params['brand_details_url']) ? esc_url_raw($json_params['brand_details_url']) : null;
 
     $has_brand = $white_label_enabled !== null || $brand_display_name !== null || $brand_plugin_name !== null || $brand_plugin_author !== null || $brand_logo !== null || $brand_details_url !== null;
-    $has_other = $site_id !== '' || $secret_token !== '' || $optimization_delivery !== null || $llm_tracking_enabled !== null || $show_logs_menu !== null || $log_level !== '' || $llms_txt_enabled !== null || $indexnow_enabled !== null || $indexnow_regenerate || $llm_version_settings !== null;
+    $has_other = $site_id !== '' || $secret_token !== '' || $optimization_delivery !== null || $llm_tracking_enabled !== null || $show_logs_menu !== null || $log_level !== '' || $llms_txt_enabled !== null || $indexnow_enabled !== null || $webmcp_enabled !== null || $webmcp_disabled_tools !== null || $indexnow_regenerate || $llm_version_settings !== null;
     if (!$has_brand && !$has_other) {
         return new WP_Error('no_settings', 'At least one setting must be provided', array('status' => 400));
     }
@@ -976,6 +997,12 @@ function geoguru_rest_update_settings($request) {
     }
     if ($llm_tracking_enabled !== null) {
         update_option('geoguru_llm_tracking_enabled', (int)$llm_tracking_enabled);
+    }
+    if ($webmcp_enabled !== null) {
+        update_option('geoguru_webmcp_enabled', (int) $webmcp_enabled);
+    }
+    if ($webmcp_disabled_tools !== null) {
+        update_option(GEOGURU_WEBMCP_DISABLED_TOOLS_OPTION, geoguru_webmcp_sanitize_tool_names($webmcp_disabled_tools));
     }
     if ($llms_txt_enabled !== null) {
         $logger->info('Updating llms.txt enabled setting to: ' . (int)$llms_txt_enabled);
@@ -1209,6 +1236,131 @@ function geoguru_rest_llm_source_event($request) {
 
     $supabase_service = GeoGuru_SupabaseService::get_instance();
     $result = $supabase_service->create_llm_source_event_via_edge($site_id, $secret_token, $url, $user_agent, $referer, $utm_source, $http_status);
+
+    if ($result === false) {
+        return new WP_Error('tracking_failed', 'Failed to record event', array('status' => 502));
+    }
+
+    return new WP_REST_Response(array('success' => true), 201);
+}
+
+function geoguru_rest_webmcp_event($request) {
+    if (!(bool) get_option('geoguru_webmcp_enabled', 0)) {
+        return new WP_Error('rest_no_route', 'No route was found matching the URL and request method.', array('status' => 404));
+    }
+
+    $logger = GeoGuru_Logger::get_instance();
+    $json_params = $request->get_json_params();
+    if (!is_array($json_params)) {
+        $raw = $request->get_body();
+        if (is_string($raw) && $raw !== '') {
+            $decoded = json_decode($raw, true);
+            if (is_array($decoded)) {
+                $json_params = $decoded;
+            }
+        }
+    }
+    if (!is_array($json_params)) {
+        return new WP_Error('invalid_body', 'Invalid JSON body', array('status' => 400));
+    }
+
+    $string_fields = array('event_type', 'page_url', 'referrer', 'user_agent', 'language', 'timezone', 'tool_name', 'query');
+    $int_fields = array('result_count', 'duration_ms');
+    $bool_fields = array('success', 'automated');
+    $string_list_fields = array('ua_brands', 'api_shape');
+    foreach ($string_fields as $field) {
+        if (isset($json_params[$field]) && !is_string($json_params[$field])) {
+            return new WP_Error('invalid_body', sprintf('%s must be a string', $field), array('status' => 400));
+        }
+    }
+    foreach ($int_fields as $field) {
+        if (isset($json_params[$field]) && !is_int($json_params[$field])) {
+            return new WP_Error('invalid_body', sprintf('%s must be an integer', $field), array('status' => 400));
+        }
+    }
+    foreach ($bool_fields as $field) {
+        if (isset($json_params[$field]) && !is_bool($json_params[$field])) {
+            return new WP_Error('invalid_body', sprintf('%s must be a boolean', $field), array('status' => 400));
+        }
+    }
+    foreach ($string_list_fields as $field) {
+        if (!isset($json_params[$field])) {
+            continue;
+        }
+        $is_string_list = is_array($json_params[$field]);
+        if ($is_string_list) {
+            foreach ($json_params[$field] as $entry) {
+                if (!is_string($entry)) {
+                    $is_string_list = false;
+                    break;
+                }
+            }
+        }
+        if (!$is_string_list) {
+            return new WP_Error('invalid_body', sprintf('%s must be an array of strings', $field), array('status' => 400));
+        }
+    }
+
+    $event_type = isset($json_params['event_type']) ? $json_params['event_type'] : '';
+    if (!in_array($event_type, array('webmcp_ready', 'tools_listed', 'tool_called'), true)) {
+        return new WP_Error('invalid_body', 'Unknown event_type', array('status' => 400));
+    }
+
+    $page_url = isset($json_params['page_url']) ? esc_url_raw($json_params['page_url']) : '';
+    if (empty($page_url)) {
+        return new WP_Error('invalid_body', 'page_url is required', array('status' => 400));
+    }
+
+    $site_id = get_option('geoguru_site_id', '');
+    $secret_token = get_option('geoguru_secret_token', '');
+    if (empty($site_id) || empty($secret_token)) {
+        $logger->warning('WebMCP event proxy: site credentials not configured');
+        return new WP_Error('not_configured', 'Tracking not configured', array('status' => 503));
+    }
+
+    $home_host = wp_parse_url(home_url(), PHP_URL_HOST);
+    $url_host = wp_parse_url($page_url, PHP_URL_HOST);
+    if (empty($home_host)) {
+    } elseif (empty($url_host) || !is_string($url_host)) {
+        $logger->debug('WebMCP event proxy: page_url could not be parsed', array('page_url' => $page_url));
+        return new WP_Error('invalid_origin', 'Invalid URL', array('status' => 400));
+    } elseif (strtolower($url_host) !== strtolower($home_host)) {
+        $logger->debug('WebMCP event proxy: page_url host mismatch', array('url_host' => $url_host, 'home_host' => $home_host));
+        return new WP_Error('invalid_origin', 'URL must be from this site', array('status' => 400));
+    }
+
+    $event = array(
+        'event_type' => $event_type,
+        'page_url'   => $page_url,
+    );
+    if (isset($json_params['referrer'])) {
+        $event['referrer'] = esc_url_raw($json_params['referrer']);
+    }
+    foreach (array('user_agent', 'language', 'timezone', 'tool_name', 'query') as $field) {
+        if (isset($json_params[$field])) {
+            $event[$field] = sanitize_text_field($json_params[$field]);
+        }
+    }
+    foreach (array('result_count', 'duration_ms', 'success', 'automated') as $field) {
+        if (isset($json_params[$field])) {
+            $event[$field] = $json_params[$field];
+        }
+    }
+    foreach (array('ua_brands', 'api_shape') as $field) {
+        if (isset($json_params[$field])) {
+            $event[$field] = array_map('sanitize_text_field', array_values($json_params[$field]));
+        }
+    }
+
+    $country = isset($_SERVER['HTTP_CF_IPCOUNTRY']) && is_string($_SERVER['HTTP_CF_IPCOUNTRY'])
+        ? strtoupper(trim(wp_unslash($_SERVER['HTTP_CF_IPCOUNTRY'])))
+        : '';
+    if (preg_match('/^[A-Z]{2}$/', $country)) {
+        $event['country'] = $country;
+    }
+
+    $supabase_service = GeoGuru_SupabaseService::get_instance();
+    $result = $supabase_service->create_webmcp_event_via_edge($site_id, $secret_token, $event);
 
     if ($result === false) {
         return new WP_Error('tracking_failed', 'Failed to record event', array('status' => 502));

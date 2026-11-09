@@ -358,5 +358,55 @@ if (!class_exists('GeoGuru_SupabaseService')) {
             $decoded = json_decode($res_body, true);
             return is_array($decoded) ? $decoded : array('success' => true);
         }
+
+        public function create_webmcp_event_via_edge($site_id, $secret_token, array $event) {
+            if (empty($this->supabase_url)) {
+                $this->logger->error('Supabase URL not configured for WebMCP event');
+                return false;
+            }
+            if (empty($site_id) || empty($secret_token)) {
+                $this->logger->error('Site ID and secret token are required for WebMCP event');
+                return false;
+            }
+
+            $edge_function_url = $this->supabase_url . '/functions/v1/create-webmcp-event';
+            $body = array_merge($event, array(
+                'site_id'      => $site_id,
+                'secret_token' => $secret_token,
+            ));
+
+            $headers = array(
+                'Content-Type'  => 'application/json',
+            );
+
+            $response = wp_remote_post($edge_function_url, array(
+                'headers' => $headers,
+                'body'    => wp_json_encode($body),
+                'timeout' => 10,
+            ));
+
+            if (is_wp_error($response)) {
+                $this->logger->error('WebMCP event via edge failed', array(
+                    'error' => $response->get_error_message(),
+                ));
+                return false;
+            }
+
+            $code = wp_remote_retrieve_response_code($response);
+            $res_body = wp_remote_retrieve_body($response);
+            if ($code !== 201 && $code !== 200) {
+                $this->logger->error('WebMCP event via edge returned error', array(
+                    'code' => $code,
+                    'body' => $res_body,
+                ));
+                return false;
+            }
+
+            $this->logger->debug('WebMCP event created via edge', array(
+                'event_type' => isset($event['event_type']) ? $event['event_type'] : null,
+            ));
+            $decoded = json_decode($res_body, true);
+            return is_array($decoded) ? $decoded : array('success' => true);
+        }
     }
 }
