@@ -15,6 +15,27 @@ define('GEOGURU_DIAGNOSTIC_OPTION_TEST_KEY', 'geoguru_diagnostic_test_option');
 define('GEOGURU_DIAGNOSTIC_TRANSIENT_TEST_KEY', 'geoguru_diagnostic_test_transient');
 
 /**
+ * Brand name to show on this page: the partner's display name on a white-label site, ours otherwise.
+ * Every message here that names the product goes through this, so a white-label admin never reads
+ * our brand on the page.
+ *
+ * @return string
+ */
+function geoguru_diagnostic_brand_name() {
+    return function_exists('geoguru_get_display_name') ? geoguru_get_display_name() : 'LovedByAI';
+}
+
+/**
+ * Whether this page is being shown on a white-label site. Used to leave out our branded header
+ * names, which have no partner-neutral spelling.
+ *
+ * @return bool
+ */
+function geoguru_diagnostic_is_white_label() {
+    return function_exists('geoguru_is_white_label') && geoguru_is_white_label();
+}
+
+/**
  * Default args for server-to-self HTTP probes (self-signed or incomplete TLS chains on staging/local).
  *
  * @param array $extra Merged on top (e.g. method, headers).
@@ -314,7 +335,9 @@ function geoguru_diagnostic_check_rest_settings_with_token($token, $auth_mode) {
     if ($http === 401 || $http === 403) {
         $mode_hint = $auth_mode === 'query'
             ? __('Token was sent in the URL query (?token=).', 'lovedbyai-seo-for-llms-and-ai-search')
-            : __('Token was sent only in the X-GeoGuru-Token header.', 'lovedbyai-seo-for-llms-and-ai-search');
+            : (geoguru_diagnostic_is_white_label()
+                ? __('Token was sent only in a request header.', 'lovedbyai-seo-for-llms-and-ai-search')
+                : __('Token was sent only in the X-GeoGuru-Token header.', 'lovedbyai-seo-for-llms-and-ai-search'));
         return array(
             'pass' => false,
             'message' => sprintf(
@@ -420,7 +443,7 @@ function geoguru_diagnostic_check_rest_namespace_not_globally_locked() {
         'pass' => true,
         'message' => sprintf(
             /* translators: %d: HTTP status code */
-            __('OK — HTTP %d. GeoGuru REST route is reachable; not failing with site-wide REST login errors.', 'lovedbyai-seo-for-llms-and-ai-search'),
+            __('OK — HTTP %d. Plugin REST route is reachable; not failing with site-wide REST login errors.', 'lovedbyai-seo-for-llms-and-ai-search'),
             $http
         ),
     );
@@ -497,7 +520,18 @@ function geoguru_diagnostic_check_rest_public_llm_event_not_globally_locked() {
 function geoguru_diagnostic_reachability_remediation_hint($classification) {
     switch ($classification) {
         case 'blocked':
-            return __('A WAF, CDN, or security plugin may be blocking requests to /wp-json/geoguru/v1/. Allow-list LovedByAI egress (e.g. the X-LovedByAI-Verify header or documented service IPs).', 'lovedbyai-seo-for-llms-and-ai-search');
+            if (geoguru_diagnostic_is_white_label()) {
+                return sprintf(
+                    /* translators: %s: product brand name */
+                    __('A WAF, CDN, or security plugin may be blocking requests to /wp-json/geoguru/v1/. Allow-list %s egress; contact support for the header or service IPs to allow.', 'lovedbyai-seo-for-llms-and-ai-search'),
+                    geoguru_diagnostic_brand_name()
+                );
+            }
+            return sprintf(
+                /* translators: %s: product brand name */
+                __('A WAF, CDN, or security plugin may be blocking requests to /wp-json/geoguru/v1/. Allow-list %s egress (e.g. the X-LovedByAI-Verify header or documented service IPs).', 'lovedbyai-seo-for-llms-and-ai-search'),
+                geoguru_diagnostic_brand_name()
+            );
         case 'not_plugin':
             return __('Confirm this plugin is active, pretty permalinks are enabled, and nothing is serving a substitute response at /wp-json/geoguru/v1/reachability.', 'lovedbyai-seo-for-llms-and-ai-search');
         case 'tls':
@@ -505,7 +539,11 @@ function geoguru_diagnostic_reachability_remediation_hint($classification) {
         case 'unreachable':
             return __('Check DNS, firewall, and hosting connectivity so the public URL resolves and accepts HTTPS from the internet.', 'lovedbyai-seo-for-llms-and-ai-search');
         case 'bad_url':
-            return __('Verify the website URL stored in LovedByAI matches this WordPress site (including subdirectory installs).', 'lovedbyai-seo-for-llms-and-ai-search');
+            return sprintf(
+                /* translators: %s: product brand name */
+                __('Verify the website URL stored in %s matches this WordPress site (including subdirectory installs).', 'lovedbyai-seo-for-llms-and-ai-search'),
+                geoguru_diagnostic_brand_name()
+            );
         default:
             return '';
     }
@@ -538,7 +576,11 @@ function geoguru_diagnostic_check_backend_service_site_reachability($label, $opt
     if ($site_id === '' || $secret === '') {
         return array(
             'pass' => false,
-            'message' => __('Skipped — site is not linked to LovedByAI (missing site id or secret token).', 'lovedbyai-seo-for-llms-and-ai-search'),
+            'message' => sprintf(
+                /* translators: %s: product brand name */
+                __('Skipped — site is not linked to %s (missing site id or secret token).', 'lovedbyai-seo-for-llms-and-ai-search'),
+                geoguru_diagnostic_brand_name()
+            ),
         );
     }
 
@@ -576,9 +618,10 @@ function geoguru_diagnostic_check_backend_service_site_reachability($label, $opt
         return array(
             'pass' => false,
             'message' => sprintf(
-                /* translators: %s: service label */
-                __('%s rejected the site secret token (HTTP 401). Re-link the plugin or rotate the site secret in LovedByAI.', 'lovedbyai-seo-for-llms-and-ai-search'),
-                $label
+                /* translators: 1: service label, 2: product brand name */
+                __('%1$s rejected the site secret token (HTTP 401). Re-link the plugin or rotate the site secret in %2$s.', 'lovedbyai-seo-for-llms-and-ai-search'),
+                $label,
+                geoguru_diagnostic_brand_name()
             ),
         );
     }
@@ -1362,12 +1405,15 @@ function geoguru_render_environment_diagnosis_page() {
     }
 
     $diagnostic_page_url = admin_url('admin.php?page=' . GEOGURU_DIAGNOSTIC_PAGE_SLUG);
-    $display_name = function_exists('geoguru_get_display_name') ? geoguru_get_display_name() : 'LovedByAI';
+    $display_name = geoguru_diagnostic_brand_name();
     ?>
     <div class="wrap">
         <h1><?php echo esc_html($display_name . ' — ' . __('Environment diagnosis', 'lovedbyai-seo-for-llms-and-ai-search')); ?></h1>
         <p class="description">
-            <?php esc_html_e('Verifies permissions, database options, transients, REST token flow, server-to-self REST GET, CORS (with portal proxy rescue fallback), WordPress-wide REST login rules, whether LovedByAI backend services can reach this site\'s public reachability endpoint (WAF / connectivity), and that the public tracking endpoint stays reachable. Run any time after changing hosting, cache, or security plugins.', 'lovedbyai-seo-for-llms-and-ai-search'); ?>
+            <?php
+            /* translators: %s: product brand name */
+            echo esc_html(sprintf(__('Verifies permissions, database options, transients, REST token flow, server-to-self REST GET, CORS (with portal proxy rescue fallback), WordPress-wide REST login rules, whether %s backend services can reach this site\'s public reachability endpoint (WAF / connectivity), and that the public tracking endpoint stays reachable. Run any time after changing hosting, cache, or security plugins.', 'lovedbyai-seo-for-llms-and-ai-search'), $display_name));
+            ?>
         </p>
 
         <p>
@@ -1683,7 +1729,10 @@ function geoguru_render_environment_diagnosis_page() {
 
         <h2><?php esc_html_e('7. Backend services → WordPress reachability', 'lovedbyai-seo-for-llms-and-ai-search'); ?></h2>
         <p class="description">
-            <?php esc_html_e('Each row asks a LovedByAI cloud service to fetch this site\'s public GET /wp-json/geoguru/v1/reachability from the internet (same path our integrations use). If a row fails, a WAF, CDN, firewall, or security plugin may be blocking outbound traffic from that service to your WordPress REST API.', 'lovedbyai-seo-for-llms-and-ai-search'); ?>
+            <?php
+            /* translators: %s: product brand name */
+            echo esc_html(sprintf(__('Each row asks a %s cloud service to fetch this site\'s public GET /wp-json/geoguru/v1/reachability from the internet (same path our integrations use). If a row fails, a WAF, CDN, firewall, or security plugin may be blocking outbound traffic from that service to your WordPress REST API.', 'lovedbyai-seo-for-llms-and-ai-search'), $display_name));
+            ?>
         </p>
         <table class="widefat striped">
             <thead>

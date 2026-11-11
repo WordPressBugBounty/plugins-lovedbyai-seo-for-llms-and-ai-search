@@ -3,7 +3,7 @@
  * Plugin Name: LovedByAI - Generative Engine Optimization AI Search
  * Description: Automatically optimize your website to ensure it gets noticed by LLMs and AI search engines.
  * Plugin URI: https://lovedby.ai
- * Version: 2.5.5
+ * Version: 2.6.1
  * Author: LovedByAI
  * Author URI: https://lovedby.ai
  * Requires PHP: 7.1
@@ -902,12 +902,16 @@ function geoguru_rest_get_settings($request) {
         'llms_txt_enabled' => (bool)get_option('geoguru_llms_txt_enabled', 1),
         'indexnow_enabled' => (bool)get_option('geoguru_indexnow_enabled', 1),
         'indexnow_key' => sanitize_text_field(get_option('geoguru_indexnow_key', '')),
-        'webmcp_enabled' => (bool) get_option('geoguru_webmcp_enabled', 0),
+        'webmcp_enabled' => (bool) get_option('geoguru_webmcp_enabled', 1),
         'webmcp_disabled_tools' => geoguru_webmcp_disabled_tools(),
         'webmcp_assets_url' => GeoGuru_RequestsInterceptor::webmcp_assets_base(),
         'llm_version_settings' => get_option('geoguru_llm_version_settings', array()),
         'wp_debug' => defined('WP_DEBUG') && WP_DEBUG,
-        'site_url' => esc_url_raw(get_site_url())
+        'site_url' => esc_url_raw(get_site_url()),
+        // The environment diagnosis page has no admin menu entry; the portal links to it from the
+        // settings screen. Builds that report this URL also mask our brand on that page, which is
+        // what lets the portal offer the link on white-label sites.
+        'diagnosis_page_url' => esc_url_raw(admin_url('admin.php?page=' . GEOGURU_DIAGNOSTIC_PAGE_SLUG))
     );
     
     return new WP_REST_Response($settings, 200);
@@ -1245,7 +1249,7 @@ function geoguru_rest_llm_source_event($request) {
 }
 
 function geoguru_rest_webmcp_event($request) {
-    if (!(bool) get_option('geoguru_webmcp_enabled', 0)) {
+    if (!(bool) get_option('geoguru_webmcp_enabled', 1)) {
         return new WP_Error('rest_no_route', 'No route was found matching the URL and request method.', array('status' => 404));
     }
 

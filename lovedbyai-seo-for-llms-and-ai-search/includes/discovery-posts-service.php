@@ -1,11 +1,13 @@
 <?php
 // GET /discovery/posts: every published post of every public, viewable type, in every language,
 // a page at a time, for the page-discovery service. Metadata only: no rendered body and no post
-// meta value; fields=field_hashes (asked for by name only) adds one-way hashes of the raw fields.
+// meta value; fields=field_hashes (asked for by name only) adds one-way hashes of the raw fields, and
+// fields=noindex (also by name only) whether each post's page says robots noindex.
 
 defined('ABSPATH') || exit;
 
 require_once __DIR__ . '/post-field-hashes.php';
+require_once __DIR__ . '/discovery-noindex.php';
 
 define('GEOGURU_DISCOVERY_POSTS_SCHEMA_VERSION', 1);
 define('GEOGURU_DISCOVERY_POSTS_DEFAULT_PER_PAGE', 200);
@@ -62,6 +64,7 @@ define('GEOGURU_DISCOVERY_POSTS_FIELDS', array(
 // needs them. Each comes after every default field.
 define('GEOGURU_DISCOVERY_POSTS_OPT_IN_FIELDS', array(
     'field_hashes',
+    'noindex',
 ));
 
 function geoguru_register_discovery_posts_routes() {
@@ -288,35 +291,64 @@ function geoguru_discovery_posts_load($ids, $whole) {
     return $by_id;
 }
 
-/**
- * post id => length of the longest page-builder data the post has, counting a builder only while it
- * renders the post (see GEOGURU_DISCOVERY_POSTS_BUILDERS). One query for the page: each data key's
- * length, and the start of each switch key's value.
- */
-function geoguru_discovery_posts_builder_lengths($ids) {
-    global $wpdb;
-    if (!$ids) {
-        return array();
-    }
+/** The meta keys geoguru_discovery_posts_builder_lengths() reads: each builder's data and switch keys. */
+function geoguru_discovery_posts_builder_keys() {
     $keys = array_keys(GEOGURU_DISCOVERY_POSTS_BUILDERS);
     foreach (GEOGURU_DISCOVERY_POSTS_BUILDERS as $switch) {
         if ($switch !== null) {
             $keys[] = $switch[0];
         }
     }
+    return $keys;
+}
+
+/**
+ * post id => meta key => array('length', 'head', 'value') for these keys, in one query: every key's
+ * length in characters and first 20 characters, and the whole value only for $value_keys (a builder's
+ * data can be megabytes; the values asked for are short settings). 'value' is null for the others.
+ */
+function geoguru_discovery_posts_meta_rows($ids, $length_keys, $value_keys) {
+    global $wpdb;
+    $keys = array_values(array_unique(array_merge($length_keys, $value_keys)));
+    if (!$ids || !$keys) {
+        return array();
+    }
+    $value_column = $value_keys
+        ? 'IF(meta_key IN (' . implode(', ', array_fill(0, count($value_keys), '%s')) . '), meta_value, NULL)'
+        : 'NULL';
     // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared
     $rows = $wpdb->get_results(
         $wpdb->prepare(
-            "SELECT post_id, meta_key, CHAR_LENGTH(meta_value) AS geoguru_length, LEFT(meta_value, 20) AS geoguru_head
+            "SELECT post_id, meta_key, CHAR_LENGTH(meta_value) AS geoguru_length, LEFT(meta_value, 20) AS geoguru_head,
+                    $value_column AS geoguru_value
                FROM {$wpdb->postmeta}
               WHERE post_id IN (" . implode(', ', array_fill(0, count($ids), '%d')) . ')
                 AND meta_key IN (' . implode(', ', array_fill(0, count($keys), '%s')) . ')',
-            array_merge(array_map('intval', $ids), $keys)
+            array_merge($value_keys, array_map('intval', $ids), $keys)
         )
     );
     $meta = array();
     foreach ((array) $rows as $row) {
-        $meta[(int) $row->post_id][(string) $row->meta_key] = $row;
+        $meta[(int) $row->post_id][(string) $row->meta_key] = array(
+            'length' => (int) $row->geoguru_length,
+            'head' => (string) $row->geoguru_head,
+            'value' => $row->geoguru_value,
+        );
+    }
+    return $meta;
+}
+
+/**
+ * post id => length of the longest page-builder data the post has, counting a builder only while it
+ * renders the post (see GEOGURU_DISCOVERY_POSTS_BUILDERS). From $meta (geoguru_discovery_posts_meta_rows
+ * with the builder keys) when given, else one query for the page.
+ */
+function geoguru_discovery_posts_builder_lengths($ids, $meta = null) {
+    if (!$ids) {
+        return array();
+    }
+    if ($meta === null) {
+        $meta = geoguru_discovery_posts_meta_rows($ids, geoguru_discovery_posts_builder_keys(), array());
     }
     $lengths = array();
     foreach ($meta as $id => $by_key) {
@@ -325,10 +357,10 @@ function geoguru_discovery_posts_builder_lengths($ids) {
                 continue;
             }
             if ($switch !== null
-                && (!isset($by_key[$switch[0]]) || (string) $by_key[$switch[0]]->geoguru_head !== $switch[1])) {
+                && (!isset($by_key[$switch[0]]) || $by_key[$switch[0]]['head'] !== $switch[1])) {
                 continue;
             }
-            $lengths[$id] = max(isset($lengths[$id]) ? $lengths[$id] : 0, (int) $by_key[$data_key]->geoguru_length);
+            $lengths[$id] = max(isset($lengths[$id]) ? $lengths[$id] : 0, $by_key[$data_key]['length']);
         }
     }
     return $lengths;
@@ -443,7 +475,7 @@ function geoguru_discovery_posts_gmt($gmt, $local) {
     return $ts === false ? null : gmdate('Y-m-d\TH:i:s\Z', $ts);
 }
 
-function geoguru_discovery_posts_item($post, $fields, $languages, $builder_lengths) {
+function geoguru_discovery_posts_item($post, $fields, $languages, $builder_lengths, $noindex = array()) {
     $item = array('wp_post_id' => (int) $post->ID);
     foreach ($fields as $field) {
         switch ($field) {
@@ -491,6 +523,10 @@ function geoguru_discovery_posts_item($post, $fields, $languages, $builder_lengt
                 // Opt-in only. The caller primes the page's meta first: one query, not one per post.
                 $item[$field] = geoguru_post_field_hashes($post);
                 break;
+            case 'noindex':
+                // Opt-in only. true, false, or null when it can't be told (see discovery-noindex.php).
+                $item[$field] = array_key_exists((int) $post->ID, $noindex) ? $noindex[(int) $post->ID] : null;
+                break;
         }
     }
     return $item;
@@ -531,15 +567,26 @@ function geoguru_rest_discovery_posts($request) {
     $posts = geoguru_discovery_posts_load($ids, $whole);
     $plugin = geoguru_discovery_posts_multilingual_plugin();
     $languages = in_array('language', $fields, true) ? geoguru_discovery_posts_languages($posts, $plugin) : array();
-    $builder_lengths = in_array('content_length', $fields, true) ? geoguru_discovery_posts_builder_lengths($ids) : array();
+    // One postmeta query for both fields that read meta: builder lengths and the SEO plugins' settings.
+    $with_lengths = in_array('content_length', $fields, true);
+    $with_noindex = in_array('noindex', $fields, true);
+    $meta = $with_lengths || $with_noindex
+        ? geoguru_discovery_posts_meta_rows(
+            $ids,
+            $with_lengths ? geoguru_discovery_posts_builder_keys() : array(),
+            $with_noindex ? geoguru_noindex_meta_keys() : array()
+        )
+        : array();
+    $builder_lengths = $with_lengths ? geoguru_discovery_posts_builder_lengths($ids, $meta) : array();
     if ($hashed && $posts) {
         update_meta_cache('post', array_keys($posts));
     }
+    $noindex = $with_noindex ? geoguru_discovery_posts_noindex($posts, $meta) : array();
 
     $items = array();
     foreach ($ids as $id) {
         if (isset($posts[$id])) {
-            $items[] = geoguru_discovery_posts_item($posts[$id], $fields, $languages, $builder_lengths);
+            $items[] = geoguru_discovery_posts_item($posts[$id], $fields, $languages, $builder_lengths, $noindex);
         }
     }
 

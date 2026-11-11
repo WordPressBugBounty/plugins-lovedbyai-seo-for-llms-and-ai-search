@@ -328,7 +328,15 @@ class GeoGuru_PostEventsService {
         }
 
         $languages = geoguru_discovery_posts_languages($posts, geoguru_discovery_posts_multilingual_plugin());
-        $builder_lengths = geoguru_discovery_posts_builder_lengths(array_keys($posts));
+        $meta = geoguru_discovery_posts_meta_rows(
+            array_keys($posts),
+            geoguru_discovery_posts_builder_keys(),
+            geoguru_noindex_meta_keys()
+        );
+        $builder_lengths = geoguru_discovery_posts_builder_lengths(array_keys($posts), $meta);
+        // Built at shutdown, after the SEO plugin saved its settings for the post.
+        $noindex = geoguru_discovery_posts_noindex($posts, $meta);
+        // The route's fields plus its opt-in ones (contract C6): field_hashes and noindex.
         $fields = array_merge(GEOGURU_DISCOVERY_POSTS_FIELDS, GEOGURU_DISCOVERY_POSTS_OPT_IN_FIELDS);
 
         $events = array();
@@ -336,7 +344,7 @@ class GeoGuru_PostEventsService {
             $chunk_ids = array_keys($chunk);
             update_meta_cache('post', $chunk_ids);
             foreach ($chunk as $id => $post) {
-                $event = $this->build_upsert_event($post, $upserts[$id], $fields, $languages, $builder_lengths);
+                $event = $this->build_upsert_event($post, $upserts[$id], $fields, $languages, $builder_lengths, $noindex);
                 if ($event !== null) {
                     $events[] = $event;
                 }
@@ -354,8 +362,8 @@ class GeoGuru_PostEventsService {
     }
 
     /** One publish / update event, or null for a post that has no public URL or no date at all. */
-    private function build_upsert_event($post, $type, array $fields, array $languages, array $builder_lengths) {
-        $item = geoguru_discovery_posts_item($post, $fields, $languages, $builder_lengths);
+    private function build_upsert_event($post, $type, array $fields, array $languages, array $builder_lengths, array $noindex) {
+        $item = geoguru_discovery_posts_item($post, $fields, $languages, $builder_lengths, $noindex);
         if ($item['url'] === '') {
             return null;
         }

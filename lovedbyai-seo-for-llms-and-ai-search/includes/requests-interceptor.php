@@ -262,7 +262,7 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
                 add_action('wp_enqueue_scripts', array($this, 'enqueue_llm_tracking_script'));
             }
 
-            if ($this->get_boolean_option('geoguru_webmcp_enabled', 0) && !empty($site_id) && !empty($secret_token) && self::webmcp_assets_base() !== '') {
+            if ($this->get_boolean_option('geoguru_webmcp_enabled', 1) && !empty($site_id) && !empty($secret_token) && self::webmcp_assets_base() !== '') {
                 add_action('wp_enqueue_scripts', array($this, 'enqueue_webmcp_script'));
             }
 
