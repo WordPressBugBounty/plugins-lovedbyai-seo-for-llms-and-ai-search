@@ -3,7 +3,7 @@
  * Plugin Name: LovedByAI - Generative Engine Optimization AI Search
  * Description: Automatically optimize your website to ensure it gets noticed by LLMs and AI search engines.
  * Plugin URI: https://lovedby.ai
- * Version: 2.6.2
+ * Version: 2.6.3
  * Author: LovedByAI
  * Author URI: https://lovedby.ai
  * Requires PHP: 7.1
@@ -29,6 +29,7 @@ $geoguru_required_files = [
     'includes/webmcp-settings.php',
     'includes/requests-interceptor.php',
     'includes/config-service.php',
+    'includes/ecommerce-platform.php',
     'includes/supabase-service.php',
     'includes/mixpanel-service.php',
     'includes/llms-txt-service.php',
@@ -250,17 +251,32 @@ function geoguru_insert_plugin_default_config() {
     }
 }
 
+if (!defined('GEOGURU_SYNC_PENDING_OPTION')) {
+    define('GEOGURU_SYNC_PENDING_OPTION', 'geoguru_sync_pending');
+}
+
 /**
  * Pull this site's settings from the backend and apply them, so local options converge to the
  * source of truth. No-op before the site is registered or if the backend can't be reached.
+ *
+ * The same call reports the site's e-commerce platform. Pass false from a request where other
+ * plugins may not be loaded yet (our own activation): the platform is then left out, not reported
+ * as "not a store".
+ *
+ * @param bool $report_platform Whether this request can tell which store plugin is running.
  */
-function geoguru_reconcile_synced_settings() {
+function geoguru_reconcile_synced_settings($report_platform = true) {
+    if ($report_platform) {
+        // A full sync was owed and is being attempted now. Cleared before the fetch, not after a
+        // success: an unreachable backend must not make every admin page load wait on a retry.
+        delete_option(GEOGURU_SYNC_PENDING_OPTION);
+    }
     $site_id = get_option('geoguru_site_id', '');
     $secret_token = get_option('geoguru_secret_token', '');
     if (empty($site_id) || empty($secret_token) || !class_exists('GeoGuru_SettingsSyncService')) {
         return;
     }
-    $synced_settings = GeoGuru_SupabaseService::get_instance()->get_synced_settings($site_id, $secret_token);
+    $synced_settings = GeoGuru_SupabaseService::get_instance()->get_synced_settings($site_id, $secret_token, $report_platform);
     if (is_array($synced_settings)) {
         GeoGuru_SettingsSyncService::get_instance()->apply_synced_settings($synced_settings);
     }
@@ -269,13 +285,18 @@ function geoguru_reconcile_synced_settings() {
 if (!defined('GEOGURU_RECONCILE_EVENT')) {
     define('GEOGURU_RECONCILE_EVENT', 'geoguru_reconcile_synced_settings_event');
 }
-add_action(GEOGURU_RECONCILE_EVENT, 'geoguru_reconcile_synced_settings');
+// Zero accepted arguments: whatever a caller passes with the event, the scheduled run is a full sync.
+add_action(GEOGURU_RECONCILE_EVENT, 'geoguru_reconcile_synced_settings', 10, 0);
 
 /**
  * Reconcile on the next WP-Cron run instead of now, for callers that must not wait on the fetch.
  * One pending run is enough, however many times this is asked for before it happens.
+ *
+ * WP-Cron does not fire on every site (disabled, or the host blocks the loopback request), so the
+ * sync is also marked as owed: the next admin request runs it if cron has not by then.
  */
 function geoguru_schedule_synced_settings_reconcile() {
+    update_option(GEOGURU_SYNC_PENDING_OPTION, 1);
     if (!wp_next_scheduled(GEOGURU_RECONCILE_EVENT)) {
         wp_schedule_single_event(time(), GEOGURU_RECONCILE_EVENT);
     }
@@ -990,11 +1011,24 @@ function geoguru_rest_update_settings($request) {
         }
     }
 
+    $connection_changed = geoguru_site_connection_changed(
+        (string) get_option('geoguru_site_id', ''),
+        (string) get_option('geoguru_secret_token', ''),
+        $site_id,
+        $secret_token
+    );
     if (!empty($site_id)) {
         update_option('geoguru_site_id', $site_id);
     }
     if (!empty($secret_token)) {
         update_option('geoguru_secret_token', $secret_token);
+    }
+    // A site that just connected has never synced: the sync is what reports its plugin version and
+    // e-commerce platform, and nothing else runs it until our next update. On the next cron run
+    // (or the next admin request, where cron does not fire), not here, so this request does not
+    // wait on the fetch.
+    if ($connection_changed) {
+        geoguru_schedule_synced_settings_reconcile();
     }
     if ($validated_delivery !== null) {
         geoguru_delivery_store($validated_delivery);
@@ -1441,7 +1475,13 @@ function geoguru_plugin_activated() {
 
             // Reconcile local options to the backend's source of truth, so a value set
             // server-side applies to this site even if an earlier sync never reached it.
-            geoguru_reconcile_synced_settings();
+            //
+            // Without the e-commerce platform: plugins activated after ours in the same request
+            // (a bulk "activate all", `wp plugin activate --all`) are not loaded yet, so a store
+            // would be reported as "not a store". The platform goes out with the scheduled sync,
+            // on a later request where every active plugin is loaded.
+            geoguru_reconcile_synced_settings(false);
+            geoguru_schedule_synced_settings_reconcile();
 
             $backend_status_set_active_ok = $supabase_service->set_website_status_via_edge($site_id, $secret_token, 'active');
             if (!$backend_status_set_active_ok) {
@@ -1559,6 +1599,7 @@ function geoguru_plugin_uninstall() {
     delete_option('geoguru_apply_non_visible_overlay_on_original_page');
     delete_option(GEOGURU_DELIVERY_OPTION);
     delete_option(GeoGuru_SettingsSyncService::APPLIED_VALUES_OPTION);
+    delete_option(GEOGURU_SYNC_PENDING_OPTION);
     wp_clear_scheduled_hook(GEOGURU_RECONCILE_EVENT);
     delete_option('geoguru_supabase_url');
     delete_option('geoguru_supabase_anon_key');
@@ -2117,10 +2158,11 @@ add_action('upgrader_process_complete', function($upgrader_object, $options) {
 // (e.g., manual updates, WP-CLI updates, etc.)
 add_action('admin_init', function() {
     if (class_exists('GeoGuru_MigrationManager')) {
-        // Reconcile settings only when a version change was detected, so this stays a
-        // once-per-update event rather than an every-request backend call.
+        // Reconcile settings only when a version change was detected, or when a scheduled sync is
+        // still owed (WP-Cron never ran it), so this stays a once-per-event backend call rather
+        // than an every-request one. The reconcile clears the owed mark before it fetches.
         $version_changed = GeoGuru_MigrationManager::get_instance()->check_and_run_migrations();
-        if ($version_changed) {
+        if ($version_changed || get_option(GEOGURU_SYNC_PENDING_OPTION)) {
             geoguru_reconcile_synced_settings();
         }
     }

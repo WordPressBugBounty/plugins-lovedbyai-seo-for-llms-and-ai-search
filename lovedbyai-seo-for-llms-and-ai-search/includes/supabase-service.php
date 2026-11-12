@@ -107,13 +107,28 @@ if (!class_exists('GeoGuru_SupabaseService')) {
          * Fetch the site's synced settings from the backend so the plugin can reconcile local
          * options to the source of truth on activation. Authenticated by site_id + secret_token.
          *
-         * @param string $site_id      The website ID
-         * @param string $secret_token The secret token
+         * The request also reports this site's e-commerce platform ('' = not a store), unless
+         * $report_platform is false: a caller that cannot tell yet (other plugins not loaded) must
+         * leave the field out, because the backend reads an empty value as "checked, not a store".
+         *
+         * @param string $site_id         The website ID
+         * @param string $secret_token    The secret token
+         * @param bool   $report_platform Whether to report the e-commerce platform with this call
          * @return array|null Settings map when credentials are valid, null on invalid creds or error
          */
-        public function get_synced_settings($site_id, $secret_token) {
+        public function get_synced_settings($site_id, $secret_token, $report_platform = true) {
             if (empty($this->supabase_url)) {
                 return null;
+            }
+
+            $body = [
+                'site_id' => $site_id,
+                'secret_token' => $secret_token,
+                'plugin_version' => defined('GEOGURU_PLUGIN_VERSION') ? GEOGURU_PLUGIN_VERSION : 'unknown'
+            ];
+            if ($report_platform) {
+                // '' = not a store. Sent even when empty, so the backend can tell that from "never checked".
+                $body['ecommerce_platform'] = geoguru_detect_ecommerce_platform();
             }
 
             $settings_url = $this->supabase_url . '/functions/v1/get-website-settings';
@@ -121,11 +136,7 @@ if (!class_exists('GeoGuru_SupabaseService')) {
                 'headers' => [
                     'Content-Type' => 'application/json'
                 ],
-                'body' => json_encode([
-                    'site_id' => $site_id,
-                    'secret_token' => $secret_token,
-                    'plugin_version' => defined('GEOGURU_PLUGIN_VERSION') ? GEOGURU_PLUGIN_VERSION : 'unknown'
-                ]),
+                'body' => json_encode($body),
                 'timeout' => 30
             ]);
 
