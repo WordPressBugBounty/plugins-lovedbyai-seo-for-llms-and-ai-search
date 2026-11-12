@@ -1,9 +1,9 @@
 <?php return array(
     'root' => array(
         'name' => '__root__',
-        'pretty_version' => 'v2.6.1',
-        'version' => '2.6.1.0',
-        'reference' => 'fb3b2c3feeab6dba47023327d22d28e36050f843',
+        'pretty_version' => 'v2.6.2',
+        'version' => '2.6.2.0',
+        'reference' => '609c0d02ec1641f8c123e583c8fa72cc33faed85',
         'type' => 'library',
         'install_path' => __DIR__ . '/../../',
         'aliases' => array(),
@@ -11,9 +11,9 @@
     ),
     'versions' => array(
         '__root__' => array(
-            'pretty_version' => 'v2.6.1',
-            'version' => '2.6.1.0',
-            'reference' => 'fb3b2c3feeab6dba47023327d22d28e36050f843',
+            'pretty_version' => 'v2.6.2',
+            'version' => '2.6.2.0',
+            'reference' => '609c0d02ec1641f8c123e583c8fa72cc33faed85',
             'type' => 'library',
             'install_path' => __DIR__ . '/../../',
             'aliases' => array(),

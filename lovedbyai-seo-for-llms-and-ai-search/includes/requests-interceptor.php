@@ -396,6 +396,7 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
                 'httpStatus'  => GeoGuru_Utils::current_http_status(),
             );
 
+            add_filter('wp_inline_script_attributes', array($this, 'inline_script_attributes'), 10, 2);
             wp_register_script('geoguru-llm-tracking', false, array(), GEOGURU_PLUGIN_VERSION, true);
             wp_enqueue_script('geoguru-llm-tracking');
             wp_add_inline_script(
@@ -422,7 +423,7 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
                 'disabledTools' => geoguru_webmcp_disabled_tools(),
             );
 
-            add_filter('wp_inline_script_attributes', array($this, 'webmcp_module_attribute'), 10, 2);
+            add_filter('wp_inline_script_attributes', array($this, 'inline_script_attributes'), 10, 2);
             wp_register_script('geoguru-webmcp', false, array(), GEOGURU_PLUGIN_VERSION, true);
             wp_enqueue_script('geoguru-webmcp');
             wp_add_inline_script(
@@ -436,10 +437,22 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
             }
         }
 
-        // The loader uses import(), so it is printed as a module. Only the script itself:
-        // the config before it stays a classic script that sets the global first.
-        public function webmcp_module_attribute($attributes, $javascript) {
-            if (is_array($attributes) && isset($attributes['id']) && $attributes['id'] === 'geoguru-webmcp-js-after') {
+        // Page-speed plugins otherwise hold these scripts until the visitor first interacts.
+        const DELAY_EXEMPT_ATTRIBUTES = array(
+            'data-cfasync'  => 'false',
+            'nowprocket'    => true,
+            'nitro-exclude' => true,
+            'bv-exclude'    => 'true',
+        );
+
+        public function inline_script_attributes($attributes, $javascript) {
+            if (!is_array($attributes) || !isset($attributes['id']) || !preg_match('/^geoguru-(webmcp|llm-tracking)-js-(before|after)$/', $attributes['id'])) {
+                return $attributes;
+            }
+            $attributes = array_merge($attributes, self::DELAY_EXEMPT_ATTRIBUTES);
+            // The loader uses import(), so it is printed as a module. Only the script itself:
+            // the config before it stays a classic script that sets the global first.
+            if ($attributes['id'] === 'geoguru-webmcp-js-after') {
                 $attributes['type'] = 'module';
             }
             return $attributes;
