@@ -419,5 +419,37 @@ if (!class_exists('GeoGuru_SupabaseService')) {
             $decoded = json_decode($res_body, true);
             return is_array($decoded) ? $decoded : array('success' => true);
         }
+
+        /**
+         * Report the product feed's status, so the portal can show its link and state outside
+         * wp-admin. Called after a request has been answered; never on a public page view.
+         *
+         * @return bool Whether the backend saved it.
+         */
+        public function report_product_feed_via_edge($site_id, $secret_token, array $feed) {
+            if (empty($this->supabase_url) || empty($site_id) || empty($secret_token)) {
+                return false;
+            }
+            $response = wp_remote_post($this->supabase_url . '/functions/v1/report-product-feed', array(
+                'headers' => array('Content-Type' => 'application/json'),
+                'body'    => wp_json_encode(array(
+                    'site_id'        => $site_id,
+                    'secret_token'   => $secret_token,
+                    'plugin_version' => defined('GEOGURU_PLUGIN_VERSION') ? GEOGURU_PLUGIN_VERSION : null,
+                    'feed'           => $feed,
+                )),
+                'timeout' => 5,
+            ));
+            if (is_wp_error($response)) {
+                $this->logger->warning('Product feed report failed', array('error' => $response->get_error_message()));
+                return false;
+            }
+            $code = wp_remote_retrieve_response_code($response);
+            if ($code !== 200) {
+                $this->logger->warning('Product feed report was refused', array('code' => $code));
+                return false;
+            }
+            return true;
+        }
     }
 }

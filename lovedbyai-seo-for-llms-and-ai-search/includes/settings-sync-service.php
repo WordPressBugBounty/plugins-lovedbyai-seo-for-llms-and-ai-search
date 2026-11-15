@@ -42,6 +42,12 @@ class GeoGuru_SettingsSyncService {
             'send_post_events' => array('geoguru_send_post_events', 'bool'),
             'webmcp_enabled' => array('geoguru_webmcp_enabled', 'bool'),
             'webmcp_disabled_tools' => array(GEOGURU_WEBMCP_DISABLED_TOOLS_OPTION, 'tool_names'),
+            // WooCommerce product feed for ChatGPT: the owner's switch
+            // (GeoGuru_ProductFeedService::OPTION_ENABLED). Absent means on.
+            'acp_feed_enabled' => array('geoguru_acp_feed_enabled', 'bool'),
+            // Whether the site's plan includes that feed (GeoGuru_ProductFeedService::OPTION_ENTITLED).
+            // Worked out by the backend on every sync, never stored in the blob. Absent means no.
+            'product_feed_entitled' => array('geoguru_product_feed_entitled', 'bool'),
         );
     }
 
@@ -172,7 +178,13 @@ class GeoGuru_SettingsSyncService {
             if (in_array($key, $delivery_group, true)) {
                 continue; // already resolved by resolve_delivery_option() above
             }
-            if ($this->is_replay($seen, $key, $settings[$key])) {
+            // Replay protection exists so a re-sent value does not undo a choice made on the site
+            // since. Neither product feed key is chosen on the site alone:
+            //  - the plan is ours to say, so an option edited by hand is put back at the next sync;
+            //  - the owner's switch is saved to this blob by every portal change, wp-admin or not,
+            //    so the blob is its source of truth. Without this, switching it back on from the
+            //    standalone portal would be skipped as a replay of an older "on".
+            if (!in_array($key, array('product_feed_entitled', 'acp_feed_enabled'), true) && $this->is_replay($seen, $key, $settings[$key])) {
                 continue;
             }
             $option_name = $spec[0];
