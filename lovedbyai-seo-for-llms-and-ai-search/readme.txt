@@ -4,7 +4,7 @@ Tags: ai seo, geo, aeo, generative engine optimization, agentic commerce
 Requires at least: 5.8
 Tested up to: 7.1
 Requires PHP: 7.1
-Stable tag: 2.7.0
+Stable tag: 2.8.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -30,7 +30,7 @@ https://www.youtube.com/watch?v=FPXFCLPOv4s
 - **llms.txt generator:** creates /llms.txt if your site does not have one and keeps it up to date. It is a small extra, not the core of the work: AI crawlers rarely request the file, so most of LovedByAI's effort goes into the content, FAQs and structured data above.
 - **IndexNow:** pings search engines that support IndexNow, such as Bing, when pages are added or changed.
 - **AI agent tools (WebMCP):** lets AI agents that browse the web search your site and read your business details, services and products through tools, instead of guessing from the page layout. On by default on paid plans.
-- **Agentic commerce for WooCommerce (ACP and UCP):** makes your WooCommerce catalog available to AI shopping assistants. A product feed in OpenAI's Agentic Commerce Protocol format lets ChatGPT show your products with live prices and stock, and the Universal Commerce Protocol lets Google AI Mode and Gemini find your products and send shoppers to your store. Paid plans.
+- **Agentic commerce for WooCommerce (ACP and UCP):** makes your WooCommerce catalog available to AI shopping assistants. A product feed in OpenAI's Agentic Commerce Protocol format lets ChatGPT show your products with live prices and stock, and the Universal Commerce Protocol (UCP) lets AI shopping agents that use it search your products and read live prices and stock. Paid plans.
 - **AI crawler tracking:** shows which AI bots visit your site and which pages they read, including GPTBot, OAI-SearchBot, ChatGPT-User, ClaudeBot, PerplexityBot, Googlebot, Bingbot, Applebot, Amazonbot and Meta-ExternalAgent.
 - **AI referral traffic analytics:** counts the visitors that ChatGPT, Perplexity, Gemini, Claude and other AI assistants send you, page by page.
 - **Content suggestions:** tells you what to publish next and which pages to deepen, based on your site's own content.
@@ -38,10 +38,10 @@ https://www.youtube.com/watch?v=FPXFCLPOv4s
 
 ### Agentic commerce for WooCommerce stores
 
-When people ask ChatGPT or Gemini what to buy, the answer comes from product data the assistant can trust: price, stock, images and a link to buy. LovedByAI gives your WooCommerce store that data, with no separate feed plugin.
+When people ask ChatGPT what to buy, the answer comes from product data the assistant can trust: price, stock, images and a link to buy. LovedByAI gives your WooCommerce store that data, with no separate feed plugin.
 
 - **ChatGPT product feed (ACP):** your catalog in OpenAI's product feed format, served from your own domain at a private link. Paste the link into ChatGPT's merchant portal once.
-- **Google AI Mode and Gemini (UCP):** your store published through the Universal Commerce Protocol, the open standard Google and Shopify introduced, so Google's AI shopping surfaces can find your products and send shoppers to your checkout.
+- **UCP product catalog:** publishes your store's Universal Commerce Protocol profile at /.well-known/ucp, so AI shopping agents that use UCP can search your products and read live prices and stock. Paid plans.
 - **Kept current on every save:** when you add, edit or delete a product, its feed entry changes in the same moment. A full rebuild runs every day as a safety net.
 - **Straight from WooCommerce:** title, description, price, stock status, images, brand and weight come from your store as they are.
 - **AI agent tools:** AI agents shopping for someone can search your products through WebMCP instead of scraping your pages.
@@ -83,7 +83,7 @@ They describe the same goal from different angles. GEO (generative engine optimi
 
 ### Does LovedByAI work with WooCommerce?
 
-Yes. LovedByAI optimizes your store's pages like any other WordPress site, and on paid plans adds agentic commerce: a ChatGPT product feed (ACP), a Universal Commerce Protocol (UCP) profile for Google AI Mode and Gemini, and AI agent tools for your products. It runs alongside WooCommerce's own settings and your existing Google Shopping or Facebook feed plugin.
+Yes. LovedByAI optimizes your store's pages like any other WordPress site, and on paid plans adds agentic commerce: a ChatGPT product feed (ACP), a Universal Commerce Protocol (UCP) product catalog for AI shopping agents, and AI agent tools for your products. It runs alongside WooCommerce's own settings and your existing Google Shopping or Facebook feed plugin.
 
 ### How do I get my WooCommerce products into ChatGPT?
 
@@ -95,7 +95,7 @@ ACP is the open standard OpenAI and Stripe published for selling through ChatGPT
 
 ### What is the Universal Commerce Protocol (UCP)?
 
-UCP is the open standard Google and Shopify introduced so AI agents, such as Google AI Mode and Gemini, can discover a store's products and hand shoppers to its checkout. LovedByAI publishes your WooCommerce store through UCP, so you do not need to set it up yourself.
+UCP is the open standard Google and Shopify introduced so AI agents can discover a store's products. LovedByAI publishes your WooCommerce store through UCP, so you do not need to set it up yourself.
 
 ### What are AI agent tools (WebMCP)?
 
@@ -154,7 +154,6 @@ No tool can guarantee rankings or citations, because AI models decide independen
 9. **Auto-generated FAQs:** an FAQ section written from the page's own content, marked up with FAQPage schema.
 10. **Content matched to the questions people ask:** headings rewritten as questions, each with a short, quotable answer.
 11. **Actionable recommendations:** personalized next steps beyond your pages, such as a crawlability check and your Google Business Profile and BBB listings, ranked by impact and effort.
-12. **Agentic commerce:** your WooCommerce store's ACP product feed and UCP status, with the product count and the link to paste into ChatGPT.
 
 == External services ==
 
@@ -183,10 +182,17 @@ Yes. A free account at lovedby.ai is required to use this plugin. The free tier 
    - Terms: https://mixpanel.com/legal/terms-of-use/
    - Privacy: https://mixpanel.com/legal/privacy-policy/
 
+3. **AI shopping agents' UCP profiles** (at the address each calling agent provides)
+   - Purpose: When an AI shopping agent calls your store's UCP catalog, the plugin fetches that agent's public UCP profile to check which version and capabilities it supports. There is no fixed service, so there is no terms or privacy link.
+   - Data transmitted: A plain request carrying your site's address in WordPress's standard request header. No customer or visitor data.
+
 **Service Management Interface:**
 The plugin embeds a service management interface (portal app) via iframe for configuration, monitoring, and analytics. This interface is hosted on LovedByAI servers and requires an active account connection.
 
 ## Changelog
+
+### 2.8.0
+- WooCommerce stores on a paid plan publish a UCP product catalog at /.well-known/ucp. AI agents must identify themselves with a UCP profile, and the store fetches that public profile to check it. It steps aside if another plugin already provides one.
 
 ### 2.7.0
 - WooCommerce stores on a paid plan get a ChatGPT product feed in OpenAI's Agentic Commerce Protocol (ACP) format, kept current as products change. You can turn it off in the plugin settings.

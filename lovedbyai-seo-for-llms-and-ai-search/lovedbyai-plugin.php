@@ -3,7 +3,7 @@
  * Plugin Name: LovedByAI - Generative Engine Optimization AI Search
  * Description: Automatically optimize your website to ensure it gets noticed by LLMs and AI search engines.
  * Plugin URI: https://lovedby.ai
- * Version: 2.7.0
+ * Version: 2.8.0
  * Author: LovedByAI
  * Author URI: https://lovedby.ai
  * Requires PHP: 7.1
@@ -47,7 +47,11 @@ $geoguru_required_files = [
     'includes/portal-bridge.php',
     'includes/content-signals-service.php',
     'includes/discovery-posts-service.php',
-    'includes/product-feed-service.php'
+    'includes/product-feed-service.php',
+    'includes/ucp/ucp-catalog.php',
+    'includes/ucp/ucp-agent.php',
+    'includes/ucp/ucp-service.php',
+    'includes/ucp/ucp-endpoints.php'
 ];
 
 foreach ($geoguru_required_files as $geoguru_file) {
@@ -258,6 +262,15 @@ function geoguru_insert_plugin_default_config() {
         }
         if (get_option(GeoGuru_ProductFeedService::OPTION_STATE, null) === null) {
             add_option(GeoGuru_ProductFeedService::OPTION_STATE, array(), '', 'yes');
+        }
+    }
+    // Same reason as the feed's options above.
+    if (class_exists('GeoGuru_UcpService')) {
+        if (get_option(GeoGuru_UcpService::OPTION_ENABLED, null) === null) {
+            add_option(GeoGuru_UcpService::OPTION_ENABLED, 1, '', 'yes');
+        }
+        if (get_option(GeoGuru_UcpService::OPTION_ENTITLED, null) === null) {
+            add_option(GeoGuru_UcpService::OPTION_ENTITLED, 0, '', 'yes');
         }
     }
     if (!get_option('geoguru_indexnow_service_url')) {
@@ -500,10 +513,16 @@ function geoguru_allow_rest_namespace_when_restricted($result) {
     if (!geoguru_is_rest_login_required_error($result)) {
         return $result;
     }
-    if (!geoguru_rest_request_targets(array('geoguru/v1', 'geoguru-api'))) {
-        return $result;
+    if (geoguru_rest_request_targets(array('geoguru/v1', 'geoguru-api'))) {
+        return null;
     }
-    return null;
+    // Agents fetch the catalog without a login, but only while the catalog is being published.
+    if (geoguru_rest_request_targets(array('ucp-store/v1/catalog'))
+        && class_exists('GeoGuru_UcpService') && GeoGuru_UcpService::get_instance()->is_available()
+        && GeoGuru_UcpService::get_instance()->reason() === null) {
+        return null;
+    }
+    return $result;
 }
 
 /**
@@ -948,6 +967,7 @@ function geoguru_rest_get_settings($request) {
         'product_feed' => class_exists('WooCommerce') && class_exists('GeoGuru_ProductFeedService')
             ? GeoGuru_ProductFeedService::get_instance()->status()
             : null,
+        'ucp' => class_exists('WooCommerce') && class_exists('GeoGuru_UcpService') ? GeoGuru_UcpService::get_instance()->status() : null,
         'llm_version_settings' => get_option('geoguru_llm_version_settings', array()),
         'wp_debug' => defined('WP_DEBUG') && WP_DEBUG,
         'site_url' => esc_url_raw(get_site_url()),
@@ -989,6 +1009,7 @@ function geoguru_rest_update_settings($request) {
     $webmcp_enabled = isset($json_params['webmcp_enabled']) ? (filter_var($json_params['webmcp_enabled'], FILTER_VALIDATE_BOOLEAN) ? 1 : 0) : null;
     $webmcp_disabled_tools = array_key_exists('webmcp_disabled_tools', $json_params) ? $json_params['webmcp_disabled_tools'] : null;
     $acp_feed_enabled = isset($json_params['acp_feed_enabled']) ? (filter_var($json_params['acp_feed_enabled'], FILTER_VALIDATE_BOOLEAN) ? 1 : 0) : null;
+    $ucp_catalog_enabled = isset($json_params['ucp_catalog_enabled']) ? (filter_var($json_params['ucp_catalog_enabled'], FILTER_VALIDATE_BOOLEAN) ? 1 : 0) : null;
     if ($webmcp_disabled_tools !== null && !is_array($webmcp_disabled_tools)) {
         return new WP_Error('invalid_webmcp_disabled_tools', 'webmcp_disabled_tools must be an array of tool names', array('status' => 400));
     }
@@ -1003,7 +1024,7 @@ function geoguru_rest_update_settings($request) {
     $brand_details_url = isset($json_params['brand_details_url']) ? esc_url_raw($json_params['brand_details_url']) : null;
 
     $has_brand = $white_label_enabled !== null || $brand_display_name !== null || $brand_plugin_name !== null || $brand_plugin_author !== null || $brand_logo !== null || $brand_details_url !== null;
-    $has_other = $site_id !== '' || $secret_token !== '' || $optimization_delivery !== null || $llm_tracking_enabled !== null || $show_logs_menu !== null || $log_level !== '' || $llms_txt_enabled !== null || $indexnow_enabled !== null || $webmcp_enabled !== null || $webmcp_disabled_tools !== null || $acp_feed_enabled !== null || $indexnow_regenerate || $llm_version_settings !== null;
+    $has_other = $site_id !== '' || $secret_token !== '' || $optimization_delivery !== null || $llm_tracking_enabled !== null || $show_logs_menu !== null || $log_level !== '' || $llms_txt_enabled !== null || $indexnow_enabled !== null || $webmcp_enabled !== null || $webmcp_disabled_tools !== null || $acp_feed_enabled !== null || $ucp_catalog_enabled !== null || $indexnow_regenerate || $llm_version_settings !== null;
     if (!$has_brand && !$has_other) {
         return new WP_Error('no_settings', 'At least one setting must be provided', array('status' => 400));
     }
@@ -1069,6 +1090,9 @@ function geoguru_rest_update_settings($request) {
         update_option(GeoGuru_ProductFeedService::OPTION_ENABLED, (int) $acp_feed_enabled);
         // The service hooks this option's update: switched on, it builds the feed at the end of this
         // request; switched off, it removes the file now.
+    }
+    if ($ucp_catalog_enabled !== null && class_exists('GeoGuru_UcpService')) {
+        update_option(GeoGuru_UcpService::OPTION_ENABLED, (int) $ucp_catalog_enabled);
     }
     if ($llms_txt_enabled !== null) {
         $logger->info('Updating llms.txt enabled setting to: ' . (int)$llms_txt_enabled);
@@ -1636,6 +1660,8 @@ function geoguru_plugin_uninstall() {
     if (class_exists('GeoGuru_ProductFeedService')) {
         GeoGuru_ProductFeedService::get_instance()->uninstall();
     }
+    delete_option('geoguru_ucp_catalog_enabled');
+    delete_option('geoguru_ucp_catalog_entitled');
     delete_option('geoguru_supabase_url');
     delete_option('geoguru_supabase_anon_key');
     delete_option('geoguru_fire_and_forget_worker_url');
@@ -1665,6 +1691,14 @@ function geoguru_plugin_uninstall() {
         "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s",
         $like
     ));
+
+    // UCP keeps one transient per agent profile and per caller, so they are removed by prefix.
+    foreach (array('_transient_geoguru_ucp_', '_transient_timeout_geoguru_ucp_') as $ucp_prefix) {
+        $wpdb->query($wpdb->prepare(
+            "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s",
+            $wpdb->esc_like($ucp_prefix) . '%'
+        ));
+    }
 
     // Delete overlay payload post meta so nothing is orphaned.
     $wpdb->query($wpdb->prepare(
@@ -2160,6 +2194,13 @@ add_action('init', function() {
 add_action('init', function() {
     if (class_exists('GeoGuru_ProductFeedService')) {
         GeoGuru_ProductFeedService::get_instance()->init();
+    }
+}, 20);
+
+// WooCommerce product catalog profile for AI shopping agents
+add_action('init', function() {
+    if (class_exists('GeoGuru_UcpService')) {
+        GeoGuru_UcpService::get_instance()->init();
     }
 }, 20);
 

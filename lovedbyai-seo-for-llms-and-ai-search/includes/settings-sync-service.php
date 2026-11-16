@@ -48,6 +48,9 @@ class GeoGuru_SettingsSyncService {
             // Whether the site's plan includes that feed (GeoGuru_ProductFeedService::OPTION_ENTITLED).
             // Worked out by the backend on every sync, never stored in the blob. Absent means no.
             'product_feed_entitled' => array('geoguru_product_feed_entitled', 'bool'),
+            // UCP catalog switch and plan, same pattern as the product feed pair above.
+            'ucp_catalog_enabled' => array('geoguru_ucp_catalog_enabled', 'bool'),
+            'ucp_catalog_entitled' => array('geoguru_ucp_catalog_entitled', 'bool'),
         );
     }
 
@@ -184,7 +187,8 @@ class GeoGuru_SettingsSyncService {
             //  - the owner's switch is saved to this blob by every portal change, wp-admin or not,
             //    so the blob is its source of truth. Without this, switching it back on from the
             //    standalone portal would be skipped as a replay of an older "on".
-            if (!in_array($key, array('product_feed_entitled', 'acp_feed_enabled'), true) && $this->is_replay($seen, $key, $settings[$key])) {
+            //  - the UCP keys follow the same rules.
+            if (!in_array($key, array('product_feed_entitled', 'acp_feed_enabled', 'ucp_catalog_entitled', 'ucp_catalog_enabled'), true) && $this->is_replay($seen, $key, $settings[$key])) {
                 continue;
             }
             $option_name = $spec[0];
