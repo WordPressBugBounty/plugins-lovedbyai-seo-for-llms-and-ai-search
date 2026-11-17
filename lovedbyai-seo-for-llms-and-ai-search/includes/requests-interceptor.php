@@ -262,8 +262,11 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
                 add_action('wp_enqueue_scripts', array($this, 'enqueue_llm_tracking_script'));
             }
 
-            if ($this->get_boolean_option('geoguru_webmcp_enabled', 1) && !empty($site_id) && !empty($secret_token) && self::webmcp_assets_base() !== '') {
-                add_action('wp_enqueue_scripts', array($this, 'enqueue_webmcp_script'));
+            if (!empty($site_id) && !empty($secret_token)) {
+                add_action('template_redirect', array($this, 'refresh_webmcp_copy'));
+                if ($this->get_boolean_option('geoguru_webmcp_enabled', 1)) {
+                    add_action('wp_enqueue_scripts', array($this, 'enqueue_webmcp_script'));
+                }
             }
 
             // Check if plugin is still active
@@ -410,17 +413,25 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
             }
         }
 
-        public static function webmcp_assets_base() {
-            $url = (string) get_option('geoguru_webmcp_assets_url', '');
-            return $url === '' ? '' : rtrim($url, '/') . '/';
+        public function refresh_webmcp_copy() {
+            $service = GeoGuru_WebmcpToolsService::get_instance();
+            if ($service->needs_refresh()) {
+                $service->schedule_refresh();
+            }
         }
 
         public function enqueue_webmcp_script() {
+            $service = GeoGuru_WebmcpToolsService::get_instance();
+            if ($service->needs_refresh()) {
+                $service->schedule_refresh();
+            }
+            if (!$service->has_tools()) {
+                return;
+            }
+
             $config = array(
-                'proxyUrl'   => rest_url('geoguru/v1/webmcp-event'),
-                'restRoot'   => rest_url(),
-                'assetsBase' => self::webmcp_assets_base(),
-                'disabledTools' => geoguru_webmcp_disabled_tools(),
+                'proxyUrl' => rest_url('geoguru/v1/webmcp-event'),
+                'restRoot' => rest_url(),
             );
 
             add_filter('wp_inline_script_attributes', array($this, 'inline_script_attributes'), 10, 2);

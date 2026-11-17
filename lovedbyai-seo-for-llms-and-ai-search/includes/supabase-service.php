@@ -154,6 +154,50 @@ if (!class_exists('GeoGuru_SupabaseService')) {
                 : array();
         }
 
+        public function get_webmcp_tools_via_edge($site_id, $secret_token) {
+            if (empty($this->supabase_url)) {
+                return array('kind' => 'outage');
+            }
+
+            $response = wp_remote_post($this->supabase_url . '/functions/v1/get-webmcp-tools', [
+                'headers' => [
+                    'Content-Type' => 'application/json'
+                ],
+                'body' => json_encode([
+                    'site_id' => $site_id,
+                    'secret_token' => $secret_token,
+                    'plugin_version' => defined('GEOGURU_PLUGIN_VERSION') ? GEOGURU_PLUGIN_VERSION : 'unknown'
+                ]),
+                'timeout' => 5
+            ]);
+
+            if (is_wp_error($response) || wp_remote_retrieve_response_code($response) !== 200) {
+                return array('kind' => 'outage');
+            }
+
+            $decoded = json_decode(wp_remote_retrieve_body($response), true);
+            if (!is_array($decoded) || !isset($decoded['data']) || !is_array($decoded['data']) || !isset($decoded['data']['valid'])) {
+                return array('kind' => 'outage');
+            }
+
+            $data = $decoded['data'];
+            if ($data['valid'] !== true) {
+                return array('kind' => 'invalid');
+            }
+            if (!isset($data['allowed']) || $data['allowed'] !== true) {
+                return array('kind' => 'not_allowed');
+            }
+            if (!isset($data['manifest']) || !is_array($data['manifest'])) {
+                return array('kind' => 'outage');
+            }
+
+            return array(
+                'kind' => 'allowed',
+                'manifest' => $data['manifest'],
+                'executors' => (isset($data['executors']) && is_array($data['executors'])) ? $data['executors'] : array()
+            );
+        }
+
         /**
          * Set website status (active/inactive) via Edge Function. Uses site_id + secret_token for auth.
          *

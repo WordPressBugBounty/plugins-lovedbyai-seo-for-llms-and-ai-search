@@ -1,11 +1,3 @@
-// Printed as an inline <script type="module">: browsers without module support skip it,
-// and script combiners leave module scripts alone.
-//
-// Tools are not defined here. They come from tools.json under cfg.assetsBase, and each
-// tool's executor is a versioned module under cfg.assetsBase + 'executors/', imported
-// the first time the tool is called. Both URLs are built from cfg.assetsBase, which
-// the plugin sets, so the manifest can't point the loader at any other host.
-
 const MAX_LIST_EVENTS = 10;
 const MAX_QUERY_LENGTH = 200;
 const MAX_TOOLS = 20;
@@ -23,7 +15,7 @@ function isPlainObject(value) {
 
 async function main() {
     const cfg = window.geoguru_webmcp;
-    if (!cfg || !cfg.proxyUrl || !cfg.restRoot || !cfg.assetsBase) {
+    if (!cfg || !cfg.proxyUrl || !cfg.restRoot) {
         return;
     }
 
@@ -132,11 +124,12 @@ async function main() {
         return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
     }
 
-    async function runTool(toolName, executorUrl, input) {
+    async function runTool(toolName, input) {
         const start = Date.now();
         let outcome = null;
         try {
             outcome = await withTimeout((async () => {
+                const executorUrl = restUrl('geoguru/v1/webmcp-tool', { name: toolName });
                 const executor = await import(executorUrl);
                 if (typeof executor.execute !== 'function') {
                     throw new Error('executor has no execute export');
@@ -178,12 +171,11 @@ async function main() {
     function register(tool) {
         // Kept apart from the schema: the agent never sees or sets the name it is calling.
         const toolName = tool.name;
-        const executorUrl = cfg.assetsBase + 'executors/' + tool.executor;
         const definition = {
             name: toolName,
             description: tool.description,
             inputSchema: tool.inputSchema,
-            execute: (input) => runTool(toolName, executorUrl, input),
+            execute: (input) => runTool(toolName, input),
         };
         if (tool.title !== undefined) {
             definition.title = tool.title;
@@ -199,22 +191,27 @@ async function main() {
         } catch {}
     }
 
+    let listed;
+    try {
+        const res = await withTimeout(fetch(restUrl('geoguru/v1/webmcp-tools'), { credentials: 'omit', cache: 'no-store' }));
+        if (!res.ok) {
+            return;
+        }
+        listed = await res.json();
+    } catch {
+        return;
+    }
+    if (!isPlainObject(listed) || !Array.isArray(listed.tools)) {
+        return;
+    }
+
     send({ event_type: 'webmcp_ready', api_shape: apiShape() });
     wrapListing(mc, 'getTools', mcPath + '.getTools');
     wrapListing(navigator.modelContextTesting, 'listTools', 'navigator.modelContextTesting.listTools');
 
-    const res = await fetch(cfg.assetsBase + 'tools.json', { credentials: 'omit' });
-    if (!res.ok) {
-        return;
-    }
-    const manifest = await res.json();
-    if (!isPlainObject(manifest) || !Array.isArray(manifest.tools)) {
-        return;
-    }
-    const disabled = new Set(Array.isArray(cfg.disabledTools) ? cfg.disabledTools : []);
     const seen = new Set();
-    for (const tool of manifest.tools.slice(0, MAX_TOOLS)) {
-        if (isValidTool(tool) && !seen.has(tool.name) && !disabled.has(tool.name)) {
+    for (const tool of listed.tools.slice(0, MAX_TOOLS)) {
+        if (isValidTool(tool) && !seen.has(tool.name)) {
             seen.add(tool.name);
             register(tool);
         }

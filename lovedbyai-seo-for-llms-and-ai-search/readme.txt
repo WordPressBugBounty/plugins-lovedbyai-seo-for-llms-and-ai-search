@@ -4,7 +4,7 @@ Tags: ai seo, geo, aeo, generative engine optimization, agentic commerce
 Requires at least: 5.8
 Tested up to: 7.1
 Requires PHP: 7.1
-Stable tag: 2.8.0
+Stable tag: 2.8.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -190,6 +190,9 @@ Yes. A free account at lovedby.ai is required to use this plugin. The free tier 
 The plugin embeds a service management interface (portal app) via iframe for configuration, monitoring, and analytics. This interface is hosted on LovedByAI servers and requires an active account connection.
 
 ## Changelog
+
+### 2.8.1
+- Improvements to upcoming AI agent features.
 
 ### 2.8.0
 - WooCommerce stores on a paid plan publish a UCP product catalog at /.well-known/ucp. AI agents must identify themselves with a UCP profile, and the store fetches that public profile to check it. It steps aside if another plugin already provides one.

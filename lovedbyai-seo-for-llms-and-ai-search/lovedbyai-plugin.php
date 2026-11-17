@@ -3,7 +3,7 @@
  * Plugin Name: LovedByAI - Generative Engine Optimization AI Search
  * Description: Automatically optimize your website to ensure it gets noticed by LLMs and AI search engines.
  * Plugin URI: https://lovedby.ai
- * Version: 2.8.0
+ * Version: 2.8.1
  * Author: LovedByAI
  * Author URI: https://lovedby.ai
  * Requires PHP: 7.1
@@ -27,6 +27,7 @@ $geoguru_required_files = [
     'includes/logger.php',
     'includes/delivery-settings.php',
     'includes/webmcp-settings.php',
+    'includes/webmcp-tools-service.php',
     'includes/requests-interceptor.php',
     'includes/config-service.php',
     'includes/ecommerce-platform.php',
@@ -210,12 +211,7 @@ function geoguru_insert_plugin_default_config() {
         $optimized_content_cdn_url = $config->get('OPTIMIZED_CONTENT_CDN_URL', 'https://cdn.lovedby.ai');
         update_option('geoguru_optimized_content_cdn_url', $optimized_content_cdn_url);
     }
-    if (!get_option('geoguru_webmcp_assets_url')) {
-        $webmcp_assets_url = $config->get('WEBMCP_ASSETS_URL', 'https://yftzeopmdlymaredqosb.supabase.co/storage/v1/object/public/webmcp/');
-        if (filter_var($webmcp_assets_url, FILTER_VALIDATE_URL)) {
-            update_option('geoguru_webmcp_assets_url', esc_url_raw($webmcp_assets_url));
-        }
-    }
+    delete_option('geoguru_webmcp_assets_url');
     if (!get_option('geoguru_llm_tracking_enabled')) {
         update_option('geoguru_llm_tracking_enabled', 1);
     }
@@ -408,6 +404,8 @@ function geoguru_is_public_rest_route($route) {
         '/geoguru/v1/reachability',
         '/geoguru/v1/llm-source-event',
         '/geoguru/v1/webmcp-event',
+        '/geoguru/v1/webmcp-tool',
+        '/geoguru/v1/webmcp-tools',
     );
     return in_array($route, $public, true);
 }
@@ -830,6 +828,24 @@ function geoguru_register_rest_routes() {
         'permission_callback' => '__return_true',
     ));
 
+    register_rest_route('geoguru/v1', '/webmcp-tools', array(
+        'methods' => 'GET',
+        'callback' => 'geoguru_rest_webmcp_tools',
+        'permission_callback' => '__return_true',
+    ));
+
+    register_rest_route('geoguru/v1', '/webmcp-tool', array(
+        'methods' => 'GET',
+        'callback' => 'geoguru_rest_webmcp_tool',
+        'permission_callback' => '__return_true',
+        'args' => array(
+            'name' => array(
+                'required' => true,
+                'type' => 'string',
+            ),
+        ),
+    ));
+
     // GET /wp-json/geoguru/v1/reachability — public probe for backend services (WAF / connectivity checks)
     $reachability_routes = array('/reachability', '/reachability/');
     foreach ($reachability_routes as $reachability_path) {
@@ -961,7 +977,10 @@ function geoguru_rest_get_settings($request) {
         'indexnow_key' => sanitize_text_field(get_option('geoguru_indexnow_key', '')),
         'webmcp_enabled' => (bool) get_option('geoguru_webmcp_enabled', 1),
         'webmcp_disabled_tools' => geoguru_webmcp_disabled_tools(),
-        'webmcp_assets_url' => GeoGuru_RequestsInterceptor::webmcp_assets_base(),
+        'webmcp_status' => geoguru_webmcp_status(),
+        'webmcp_tools' => GeoGuru_WebmcpToolsService::get_instance()->has_tools()
+            ? GeoGuru_WebmcpToolsService::get_instance()->tool_summaries()
+            : array(),
         // The WooCommerce product feed for ChatGPT: its switch, URL, last build and last fetch.
         // Null on a site without WooCommerce, so the portal shows no feed controls there.
         'product_feed' => class_exists('WooCommerce') && class_exists('GeoGuru_ProductFeedService')
@@ -1334,8 +1353,121 @@ function geoguru_rest_llm_source_event($request) {
     return new WP_REST_Response(array('success' => true), 201);
 }
 
-function geoguru_rest_webmcp_event($request) {
+function geoguru_webmcp_status() {
+    $service = GeoGuru_WebmcpToolsService::get_instance();
+    if ($service->has_tools()) {
+        return 'allowed';
+    }
+    if (in_array($service->last_kind(), array('not_allowed', 'invalid'), true)) {
+        return 'not_allowed';
+    }
+    return 'pending';
+}
+
+function geoguru_rest_webmcp_tool($request) {
+    $service = GeoGuru_WebmcpToolsService::get_instance();
+    if ($service->needs_refresh()) {
+        $service->schedule_refresh();
+    }
+
     if (!(bool) get_option('geoguru_webmcp_enabled', 1)) {
+        return new WP_Error('rest_no_route', 'No route was found matching the URL and request method.', array('status' => 404));
+    }
+
+    $name = $request->get_param('name');
+    if (is_string($name) && in_array($name, geoguru_webmcp_disabled_tools(), true)) {
+        return new WP_Error('rest_no_route', 'No route was found matching the URL and request method.', array('status' => 404));
+    }
+    $source = (is_string($name) && $service->has_tools()) ? $service->executor_source($name) : null;
+    if ($source === null) {
+        return new WP_Error('rest_no_route', 'No route was found matching the URL and request method.', array('status' => 404));
+    }
+
+    $response = new WP_REST_Response($source, 200);
+    add_filter('rest_pre_serve_request', function ($served, $result, $req, $server) use ($source) {
+        if (!($result instanceof WP_REST_Response) || $result->get_data() !== $source) {
+            return $served;
+        }
+        $server->send_header('Content-Type', 'text/javascript; charset=utf-8');
+        $server->send_header('Cache-Control', 'no-store');
+        echo $source; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- text/javascript response
+        return true;
+    }, 10, 4);
+
+    return $response;
+}
+
+function geoguru_rest_webmcp_tools($request) {
+    $service = GeoGuru_WebmcpToolsService::get_instance();
+    if ($service->needs_refresh()) {
+        $service->schedule_refresh();
+    }
+
+    if (!(bool) get_option('geoguru_webmcp_enabled', 1) || !$service->has_tools()) {
+        return new WP_Error('rest_no_route', 'No route was found matching the URL and request method.', array('status' => 404));
+    }
+
+    if (!defined('DONOTCACHEPAGE')) {
+        define('DONOTCACHEPAGE', true);
+    }
+    do_action('litespeed_control_set_nocache', 'webmcp tool list');
+
+    $disabled = geoguru_webmcp_disabled_tools();
+    $tools = array();
+    foreach ($service->manifest_tools() as $tool) {
+        if (is_array($tool) && isset($tool['name']) && in_array($tool['name'], $disabled, true)) {
+            continue;
+        }
+        $tools[] = $tool;
+    }
+
+    $response = new WP_REST_Response(array('tools' => $tools), 200);
+    $response->header('Cache-Control', 'no-store');
+    return $response;
+}
+
+function geoguru_rest_webmcp_refresh($request) {
+    $logger = GeoGuru_Logger::get_instance();
+    $bearer = GeoGuru_Utils::read_bearer_token($request);
+    $stored = get_option('geoguru_secret_token', '');
+    if ($stored === '' || $bearer === '' || !hash_equals($stored, $bearer)) {
+        $logger->warning('WebMCP refresh rejected: invalid or missing bearer');
+        return new WP_Error('unauthorized', 'Unauthorized', array('status' => 401));
+    }
+
+    $params = $request->get_json_params();
+    $body_site = (is_array($params) && isset($params['site_id'])) ? sanitize_text_field($params['site_id']) : '';
+    $site_id = get_option('geoguru_site_id', '');
+    if ($body_site === '' || (string) $body_site !== (string) $site_id) {
+        $logger->warning('WebMCP refresh rejected: site_id mismatch');
+        return new WP_Error('forbidden', 'Site ID mismatch', array('status' => 403));
+    }
+
+    $service = GeoGuru_WebmcpToolsService::get_instance();
+    $kind = $service->refresh_now(true);
+
+    return new WP_REST_Response(
+        array(
+            'success' => in_array($kind, array('allowed', 'not_allowed', 'invalid'), true),
+            'kind' => $kind,
+            'tool_count' => $service->has_tools() ? count($service->tool_summaries()) : 0,
+        ),
+        200
+    );
+}
+
+function geoguru_register_webmcp_refresh_route() {
+    register_rest_route('geoguru-api', '/webmcp-refresh', array(
+        'methods' => 'POST',
+        'callback' => 'geoguru_rest_webmcp_refresh',
+        'permission_callback' => '__return_true',
+    ));
+}
+add_action('rest_api_init', 'geoguru_register_webmcp_refresh_route');
+
+function geoguru_rest_webmcp_event($request) {
+    $webmcp_service = GeoGuru_WebmcpToolsService::get_instance();
+    if (!(bool) get_option('geoguru_webmcp_enabled', 1) || !$webmcp_service->has_tools()) {
         return new WP_Error('rest_no_route', 'No route was found matching the URL and request method.', array('status' => 404));
     }
 
@@ -2209,6 +2341,10 @@ add_action('init', function() {
         GeoGuru_SettingsSyncService::get_instance()->init();
     }
 }, 20);
+
+if (class_exists('GeoGuru_WebmcpToolsService')) {
+    GeoGuru_WebmcpToolsService::register_hooks();
+}
 
 // Ensure security files are updated and default options are set when plugin is updated
 add_action('upgrader_process_complete', function($upgrader_object, $options) {
