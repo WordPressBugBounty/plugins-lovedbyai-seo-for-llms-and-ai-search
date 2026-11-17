@@ -636,37 +636,3 @@ function geoguru_overlay_detected_seo_plugin() {
     }
     return 'none';
 }
-
-// Best-effort full-page cache purge across common WP caching plugins (each call is a
-// no-op when its plugin is inactive). $post_id scopes the purge; 0 purges site-wide.
-function geoguru_overlay_purge_caches($post_id = 0) {
-    $post_id = (int) $post_id;
-
-    if ($post_id > 0) {
-        clean_post_cache($post_id);
-    }
-
-    if ($post_id > 0) {
-        do_action('litespeed_purge_post', $post_id);
-    } else {
-        do_action('litespeed_purge_all');
-    }
-
-    if ($post_id > 0 && function_exists('rocket_clean_post')) {
-        rocket_clean_post($post_id);
-    } elseif (function_exists('rocket_clean_domain')) {
-        rocket_clean_domain();
-    }
-
-    if ($post_id > 0 && function_exists('w3tc_flush_post')) {
-        w3tc_flush_post($post_id);
-    } elseif (function_exists('w3tc_flush_all')) {
-        w3tc_flush_all();
-    }
-
-    if ($post_id > 0 && function_exists('wpsc_delete_post_cache')) {
-        wpsc_delete_post_cache($post_id);
-    } elseif (function_exists('wp_cache_clear_cache')) {
-        wp_cache_clear_cache();
-    }
-}

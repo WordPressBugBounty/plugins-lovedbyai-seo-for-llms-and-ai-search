@@ -316,8 +316,8 @@ function geoguru_rest_receive_overlay_payload($request) {
     // The envelope is still written above, so its stamp moves on and a slower, older one is still
     // refused after it.
     $unchanged = geoguru_overlay_same_content($envelope, $previous_raw, $post_id);
-    if (!$unchanged && function_exists('geoguru_overlay_purge_caches')) {
-        geoguru_overlay_purge_caches($post_id);
+    if (!$unchanged) {
+        geoguru_purge_page_caches($post_id);
     }
 
     return new WP_REST_Response(

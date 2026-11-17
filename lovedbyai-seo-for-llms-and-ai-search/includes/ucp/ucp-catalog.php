@@ -99,7 +99,8 @@ if (!function_exists('geoguru_ucp_search_words')) {
 }
 
 if (!function_exists('geoguru_ucp_rank_word_hits')) {
-    function geoguru_ucp_rank_word_hits($ids_per_word)
+    // Word searches match inside words ('inch' in 'winch'), so titles naming more query words rank first.
+    function geoguru_ucp_rank_word_hits($ids_per_word, $titles = [], $words = [])
     {
         $counts = [];
         foreach ($ids_per_word as $ids) {
@@ -107,9 +108,21 @@ if (!function_exists('geoguru_ucp_rank_word_hits')) {
                 $counts[$id] = isset($counts[$id]) ? $counts[$id] + 1 : 1;
             }
         }
+        $named = [];
+        foreach (array_keys($counts) as $id) {
+            $title = geoguru_ucp_decode_text(isset($titles[$id]) ? $titles[$id] : '');
+            $title = function_exists('mb_strtolower') ? mb_strtolower($title, 'UTF-8') : strtolower($title);
+            $named[$id] = 0;
+            foreach ($words as $word) {
+                $named[$id] += preg_match('/(?<![\p{L}\p{N}])' . preg_quote($word, '/') . '(?![\p{L}\p{N}])/u', $title);
+            }
+        }
         $order = array_keys($counts);
         $position = array_flip($order);
-        usort($order, function ($a, $b) use ($counts, $position) {
+        usort($order, function ($a, $b) use ($counts, $named, $position) {
+            if ($named[$a] !== $named[$b]) {
+                return $named[$b] - $named[$a];
+            }
             if ($counts[$a] !== $counts[$b]) {
                 return $counts[$b] - $counts[$a];
             }
@@ -367,6 +380,17 @@ if (!function_exists('geoguru_ucp_product_description')) {
     }
 }
 
+// The Store API passes stored URLs through as they are, which can hold characters a URI may not (a "™"
+// in an upload's file name, a space). Each such byte is percent-encoded; existing escapes are kept.
+if (!function_exists('geoguru_ucp_uri')) {
+    function geoguru_ucp_uri($url)
+    {
+        return (string) preg_replace_callback('/[^\x21-\x7E]|["<>\\\\^`{|}]/', function ($m) {
+            return rawurlencode($m[0]);
+        }, (string) $url);
+    }
+}
+
 if (!function_exists('geoguru_ucp_map_product')) {
     function geoguru_ucp_map_product($product, $variations, $full = false, $barcodes = [])
     {
@@ -391,7 +415,7 @@ if (!function_exists('geoguru_ucp_map_product')) {
             'handle' => (string) ($product['slug'] ?? ''),
             'title' => geoguru_ucp_decode_text($product['name'] ?? ''),
             'description' => geoguru_ucp_product_description($product, $full),
-            'url' => (string) ($product['permalink'] ?? ''),
+            'url' => geoguru_ucp_uri($product['permalink'] ?? ''),
             'price_range' => [
                 'min' => geoguru_ucp_money($range ? $range['min_amount'] : $price, $currency, $minor),
                 'max' => geoguru_ucp_money($range ? $range['max_amount'] : $price, $currency, $minor),
@@ -410,7 +434,7 @@ if (!function_exists('geoguru_ucp_map_product')) {
 
         $media = [];
         foreach (isset($product['images']) && is_array($product['images']) ? $product['images'] : [] as $image) {
-            $media[] = ['type' => 'image', 'url' => (string) $image['src'], 'alt_text' => geoguru_ucp_decode_text($image['alt'] ?? '')];
+            $media[] = ['type' => 'image', 'url' => geoguru_ucp_uri($image['src']), 'alt_text' => geoguru_ucp_decode_text($image['alt'] ?? '')];
         }
         if ($media) {
             $mapped['media'] = $media;

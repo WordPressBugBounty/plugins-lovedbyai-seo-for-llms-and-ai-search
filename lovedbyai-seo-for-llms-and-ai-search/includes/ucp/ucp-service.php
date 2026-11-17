@@ -27,6 +27,7 @@ class GeoGuru_UcpService {
     ];
 
     private static $instance = null;
+    private $purged = false;
 
     private function __construct() {
     }
@@ -162,17 +163,49 @@ class GeoGuru_UcpService {
     // Runs on `init`, on every request.
     public function init() {
         add_action('rest_api_init', [$this, 'register_status_route']);
+        // add_option_ too: the first write of an option that was never seeded skips update_option_.
+        foreach ([self::OPTION_ENABLED, self::OPTION_ENTITLED] as $option) {
+            add_action('add_option_' . $option, [$this, 'purge_profile'], 10, 0);
+            add_action('update_option_' . $option, [$this, 'purge_profile'], 10, 0);
+        }
         $uri = esc_url_raw(wp_unslash($_SERVER['REQUEST_URI'] ?? ''));
-        $serving = self::match_profile_path($uri);
-        if (!$this->is_available()) {
+        $available = $this->is_available();
+        if (self::match_profile_path($uri)) {
+            $this->answer_profile_request($available);
+        }
+        if ($available) {
+            add_action('rest_api_init', [$this, 'register_endpoints']);
+        }
+    }
+
+    // Whether the profile is published depends on settings a page cache cannot see, so on a store no
+    // page cache keeps this address, 200 or 404. Another plugin's profile is left to its own caching.
+    private function answer_profile_request($available) {
+        if (!class_exists('WooCommerce') || $this->other_provider()) {
             return;
         }
-        if ($serving && $this->reason() === null) {
+        if (!defined('DONOTCACHEPAGE')) {
+            define('DONOTCACHEPAGE', true);
+        }
+        do_action('litespeed_control_set_nocache', 'UCP profile');
+        if ($available && $this->reason() === null) {
             $method = strtoupper(sanitize_text_field(wp_unslash($_SERVER['REQUEST_METHOD'] ?? 'GET')));
             $match = sanitize_text_field(wp_unslash($_SERVER['HTTP_IF_NONE_MATCH'] ?? ''));
             $this->send($this->profile_response($method, $match));
         }
-        add_action('rest_api_init', [$this, 'register_endpoints']);
+        nocache_headers();
+    }
+
+    // Drops both forms of the address from page caches, once a request, when publishing may have
+    // changed: a switch or plan change, activation and deactivation.
+    public function purge_profile() {
+        if ($this->purged) {
+            return;
+        }
+        $this->purged = true;
+        foreach ([self::PROFILE_PATH, self::PROFILE_PATH . '/'] as $path) {
+            geoguru_purge_page_cache_url(home_url($path));
+        }
     }
 
     public function register_status_route() {

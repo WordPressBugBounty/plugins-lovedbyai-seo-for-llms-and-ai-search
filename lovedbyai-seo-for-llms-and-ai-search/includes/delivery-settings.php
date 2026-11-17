@@ -130,8 +130,8 @@ function geoguru_delivery_store($pair) {
     $before = geoguru_get_delivery_settings();
     update_option(GEOGURU_DELIVERY_OPTION, $pair);
     $changed = geoguru_get_delivery_settings() !== $before;
-    if ($changed && function_exists('geoguru_overlay_purge_caches')) {
-        geoguru_overlay_purge_caches(0);
+    if ($changed) {
+        geoguru_purge_page_caches(0);
     }
     return $changed;
 }

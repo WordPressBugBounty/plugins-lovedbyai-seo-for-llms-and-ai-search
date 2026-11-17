@@ -4,7 +4,7 @@ Tags: ai seo, geo, aeo, generative engine optimization, agentic commerce
 Requires at least: 5.8
 Tested up to: 7.1
 Requires PHP: 7.1
-Stable tag: 2.8.1
+Stable tag: 2.8.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -190,6 +190,13 @@ Yes. A free account at lovedby.ai is required to use this plugin. The free tier 
 The plugin embeds a service management interface (portal app) via iframe for configuration, monitoring, and analytics. This interface is hosted on LovedByAI servers and requires an active account connection.
 
 ## Changelog
+
+### 2.8.3
+- UCP catalog search: when the store's search finds no exact match, products whose titles name more of the search words now come first, so a search like "2 inch lift kit yukon" no longer leads with unrelated products.
+
+### 2.8.2
+- UCP catalog image and product links are valid web addresses even when a file name holds characters like ™.
+- Page caches no longer keep the UCP catalog address, so switching UCP on or off, a plan change, or another plugin publishing it takes effect at once. Whenever UCP is switched, the plan changes or the plugin is activated or deactivated, the address is cleared from LiteSpeed, WP Rocket, W3 Total Cache and WP Super Cache.
 
 ### 2.8.1
 - Improvements to upcoming AI agent features.

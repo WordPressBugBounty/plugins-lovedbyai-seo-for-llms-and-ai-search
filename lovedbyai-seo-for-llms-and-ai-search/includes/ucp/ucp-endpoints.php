@@ -425,7 +425,11 @@ class GeoGuru_UcpEndpoints
             }
             $hits[] = $ids;
         }
-        $order = geoguru_ucp_rank_word_hits($hits);
+        $titles = [];
+        foreach ($by_id as $id => $item) {
+            $titles[$id] = isset($item['name']) ? $item['name'] : '';
+        }
+        $order = geoguru_ucp_rank_word_hits($hits, $titles, $words);
         $items = [];
         foreach (array_slice($order, ($page - 1) * $limit, $limit) as $id) {
             $items[] = $by_id[$id];

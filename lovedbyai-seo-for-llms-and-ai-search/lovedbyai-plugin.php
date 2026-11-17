@@ -3,7 +3,7 @@
  * Plugin Name: LovedByAI - Generative Engine Optimization AI Search
  * Description: Automatically optimize your website to ensure it gets noticed by LLMs and AI search engines.
  * Plugin URI: https://lovedby.ai
- * Version: 2.8.1
+ * Version: 2.8.3
  * Author: LovedByAI
  * Author URI: https://lovedby.ai
  * Requires PHP: 7.1
@@ -24,6 +24,7 @@ if (!defined('GEOGURU_PLUGIN_VERSION')) {
 // Secure file inclusion with existence checks
 $geoguru_required_files = [
     'includes/utils.php',
+    'includes/page-cache.php',
     'includes/logger.php',
     'includes/delivery-settings.php',
     'includes/webmcp-settings.php',
@@ -1623,6 +1624,10 @@ function geoguru_plugin_activated() {
 
     // Mark plugin as active
     update_option('geoguru_plugin_active', true);
+    // A page cache may have kept the UCP profile address's 404 while the plugin was off.
+    if (class_exists('GeoGuru_UcpService')) {
+        GeoGuru_UcpService::get_instance()->purge_profile();
+    }
 
     geoguru_insert_plugin_default_config();
 
@@ -1744,6 +1749,9 @@ function geoguru_plugin_deactivate() {
     
     // Set plugin as deactivated
     update_option('geoguru_plugin_active', false);
+    if (class_exists('GeoGuru_UcpService')) {
+        GeoGuru_UcpService::get_instance()->purge_profile();
+    }
     
     // Stop the requests interceptor
     if (class_exists('GeoGuru_RequestsInterceptor')) {
