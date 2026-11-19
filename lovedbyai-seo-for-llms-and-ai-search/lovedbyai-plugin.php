@@ -3,7 +3,7 @@
  * Plugin Name: LovedByAI - Generative Engine Optimization AI Search
  * Description: Automatically optimize your website to ensure it gets noticed by LLMs and AI search engines.
  * Plugin URI: https://lovedby.ai
- * Version: 2.8.3
+ * Version: 2.8.4
  * Author: LovedByAI
  * Author URI: https://lovedby.ai
  * Requires PHP: 7.1
@@ -96,14 +96,6 @@ add_filter('rest_pre_dispatch', 'geoguru_handle_cors_preflight', PHP_INT_MAX, 3)
 // In white-label mode, replace the plugin name, author and their links in the Plugins list with the brand's.
 add_filter('all_plugins', 'geoguru_filter_all_plugins_mask_brand_name');
 
-// PHP 7.1+ compatible class to replace enum (PHP 8.1+ feature)
-if (!class_exists('GeoGuru_OptimizationMethod')) {
-    class GeoGuru_OptimizationMethod {
-        const LLM_LINK_GENERATOR = "llm_link_generator";
-        const REQUESTS_INTERCEPTOR = "requests_interceptor";
-    }
-}
-
 // Option name prefix for iframe tokens (one option per token; avoids race conditions)
 // Uses options table instead of transients so tokens persist across HTTP requests
 define('GEOGURU_IFRAME_TOKEN_OPTION_PREFIX', 'geoguru_iframe_token_');
@@ -115,7 +107,7 @@ define('GEOGURU_IFRAME_TOKEN_OPTION_PREFIX', 'geoguru_iframe_token_');
 function geoguru_prune_expired_iframe_tokens() {
     global $wpdb;
 
-    // One-time cleanup of legacy shared option format (pre-1.5.3)
+    // Remove the legacy shared option format (pre-1.5.3). A no-op once it is gone.
     delete_option('geoguru_iframe_tokens');
 
     $max_age = 4 * HOUR_IN_SECONDS;
@@ -873,8 +865,8 @@ function geoguru_register_rest_routes() {
 /**
  * Sanitize LLM link appearance settings
  * 
- * Merges new settings with existing settings, preserving existing fields
- * and sanitizing/validating new appearance fields.
+ * Keeps only the known fields, sanitizing and validating each one. Unknown keys are dropped.
+ * Merging with the stored settings is the caller's job.
  * 
  * @param array $settings Settings array to sanitize
  * @return array Sanitized settings array
@@ -882,7 +874,6 @@ function geoguru_register_rest_routes() {
 function geoguru_sanitize_llm_link_settings($settings) {
     $sanitized = array();
     
-    // Preserve existing fields
     if (isset($settings['show_on_posts'])) {
         $sanitized['show_on_posts'] = (int)$settings['show_on_posts'];
     }
@@ -898,7 +889,6 @@ function geoguru_sanitize_llm_link_settings($settings) {
         $sanitized['link_position'] = in_array($position, $valid_positions) ? $position : 'center';
     }
     
-    // New appearance fields
     if (isset($settings['font_background_color'])) {
         $color = sanitize_text_field($settings['font_background_color']);
         $sanitized['font_background_color'] = GeoGuru_Utils::validate_hex_color($color) ? $color : '';
@@ -1419,6 +1409,10 @@ function geoguru_rest_webmcp_tools($request) {
         if (is_array($tool) && isset($tool['name']) && in_array($tool['name'], $disabled, true)) {
             continue;
         }
+        // Stored as a PHP array, an empty JSON object would go out as [] instead of {}.
+        if (isset($tool['inputSchema']['properties']) && $tool['inputSchema']['properties'] === array()) {
+            $tool['inputSchema']['properties'] = new stdClass();
+        }
         $tools[] = $tool;
     }
 
@@ -1699,7 +1693,7 @@ function geoguru_plugin_activated() {
     // GeoGuru page, so the affiliation cookie can be sent. Do not create website or start
     // interceptor here; plugins_loaded will start the interceptor once credentials exist.
     $mixpanel->track('geoguru_plugin_activated', [
-        'optimization_method' => get_option('geoguru_optimization_method', GeoGuru_OptimizationMethod::LLM_LINK_GENERATOR),
+        'optimization_method' => get_option('geoguru_optimization_method', 'llm_link_generator'),
         'is_first_activation' => true,
         'did_create_website_id' => false,
         'registration_deferred' => true,

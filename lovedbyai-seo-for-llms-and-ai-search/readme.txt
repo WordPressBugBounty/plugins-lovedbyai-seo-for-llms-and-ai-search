@@ -4,7 +4,7 @@ Tags: ai seo, geo, aeo, generative engine optimization, agentic commerce
 Requires at least: 5.8
 Tested up to: 7.1
 Requires PHP: 7.1
-Stable tag: 2.8.3
+Stable tag: 2.8.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -190,6 +190,9 @@ Yes. A free account at lovedby.ai is required to use this plugin. The free tier 
 The plugin embeds a service management interface (portal app) via iframe for configuration, monitoring, and analytics. This interface is hosted on LovedByAI servers and requires an active account connection.
 
 ## Changelog
+
+### 2.8.4
+- WebMCP: a tool that takes no inputs now publishes a valid input schema, with an empty object for its properties instead of an empty list.
 
 ### 2.8.3
 - UCP catalog search: when the store's search finds no exact match, products whose titles name more of the search words now come first, so a search like "2 inch lift kit yukon" no longer leads with unrelated products.

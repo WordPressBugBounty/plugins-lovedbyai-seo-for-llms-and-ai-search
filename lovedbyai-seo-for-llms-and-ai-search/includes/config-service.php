@@ -38,9 +38,5 @@ if (!class_exists('GeoGuru_ConfigService')) {
             $value = getenv($key);
             return $value !== false ? $value : $default;
         }
-
-        public function all() {
-            return $this->env;
-        }
     }
 }
