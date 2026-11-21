@@ -3,7 +3,7 @@
  * Plugin Name: LovedByAI - Generative Engine Optimization AI Search
  * Description: Automatically optimize your website to ensure it gets noticed by LLMs and AI search engines.
  * Plugin URI: https://lovedby.ai
- * Version: 2.8.4
+ * Version: 2.9.0
  * Author: LovedByAI
  * Author URI: https://lovedby.ai
  * Requires PHP: 7.1
@@ -49,6 +49,7 @@ $geoguru_required_files = [
     'includes/portal-bridge.php',
     'includes/content-signals-service.php',
     'includes/discovery-posts-service.php',
+    'includes/site-cleanup-service.php',
     'includes/product-feed-service.php',
     'includes/ucp/ucp-catalog.php',
     'includes/ucp/ucp-agent.php',
@@ -859,6 +860,9 @@ function geoguru_register_rest_routes() {
 
     if (function_exists('geoguru_register_discovery_posts_routes')) {
         geoguru_register_discovery_posts_routes();
+    }
+    if (function_exists('geoguru_register_site_cleanup_routes')) {
+        geoguru_register_site_cleanup_routes();
     }
 }
 
@@ -2187,6 +2191,12 @@ function geoguru_render_portal_page() {
     );
     if (geoguru_is_white_label()) {
         $params['wp_white_label'] = 'true';
+    }
+    // A link from the dashboard outside wp-admin ("Open in WordPress") can name the one screen to open.
+    // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only, and only an allowlisted path passes.
+    $portal_path = geoguru_portal_deep_link_path(isset($_GET['portal_path']) ? wp_unslash($_GET['portal_path']) : '');
+    if ($portal_path !== '') {
+        $params['wp_portal_path'] = $portal_path;
     }
     $query_params = http_build_query($params);
 

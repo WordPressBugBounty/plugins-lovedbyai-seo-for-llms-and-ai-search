@@ -4,7 +4,7 @@ Tags: ai seo, geo, aeo, generative engine optimization, agentic commerce
 Requires at least: 5.8
 Tested up to: 7.1
 Requires PHP: 7.1
-Stable tag: 2.8.4
+Stable tag: 2.9.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -190,6 +190,9 @@ Yes. A free account at lovedby.ai is required to use this plugin. The free tier 
 The plugin embeds a service management interface (portal app) via iframe for configuration, monitoring, and analytics. This interface is hosted on LovedByAI servers and requires an active account connection.
 
 ## Changelog
+
+### 2.9.0
+- Remove pages flagged as not belonging to your site, straight from the dashboard. Pages go to the WordPress trash, so they can be restored for 30 days. The home page, the blog page, the privacy page and store pages are never removed.
 
 ### 2.8.4
 - WebMCP: a tool that takes no inputs now publishes a valid input schema, with an empty object for its properties instead of an empty list.
