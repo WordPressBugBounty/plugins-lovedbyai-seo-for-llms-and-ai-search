@@ -1,18 +1,20 @@
 # LovedByAI – AI SEO, GEO & AEO for ChatGPT and AI Search, Agentic WooCommerce (ACP, UCP) & WebMCP
 Contributors: nivpenso
-Tags: ai seo, geo, aeo, generative engine optimization, agentic commerce
+Tags: ai seo, geo, aeo, chatgpt, agentic commerce
 Requires at least: 5.8
 Tested up to: 7.1
 Requires PHP: 7.1
-Stable tag: 2.9.0
+Stable tag: 2.9.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Get cited by ChatGPT, Perplexity, Gemini and AI Overviews. Schema, FAQs, llms.txt, AI traffic tracking, and ACP and UCP for WooCommerce stores.
+Get your small business recommended by ChatGPT, Gemini and Google AI. AI SEO for WordPress and WooCommerce: schema, FAQs, AI traffic.
 
 ## Description
 
 **[LovedByAI](https://www.lovedby.ai) is a GEO plugin for WordPress and WooCommerce: generative engine optimization built for small businesses and online stores.** It automates the on-page work that helps ChatGPT, Perplexity, Gemini, Claude and Google AI Overviews understand, cite and recommend your site, makes your WooCommerce products available to AI shopping assistants through the Agentic Commerce Protocol (ACP) and the Universal Commerce Protocol (UCP), and reports AI crawler visits and AI referral traffic back to you.
+
+**Best for:** small businesses and local services, WooCommerce stores, and agencies managing client sites.
 
 GEO, AEO (answer engine optimization) and AI SEO are three names for the same job: making your pages the source an AI assistant quotes when your customers ask a question. Your existing SEO plugin looks after Google's blue links. LovedByAI looks after the AI answers, and runs alongside Yoast SEO, Rank Math, All in One SEO and SEOPress.
 
@@ -60,6 +62,17 @@ Small businesses on WordPress that want to be the name an AI assistant recommend
 
 No coding is needed. New and changed pages are optimized automatically, and you can review every change before it goes live.
 
+### For agencies
+
+Offer AI search optimization to your WordPress clients without adding work for your team.
+
+- **Refer or resell:** earn a share of what your referred clients spend, or bundle discounted licenses into your own plans.
+- **Licenses you can move:** buy seats in bulk and move them between client sites whenever you need to.
+- **Reports that send themselves:** every client gets an automatic monthly report with AI bot visits, mentions in AI answers, visitors from ChatGPT, Perplexity and Gemini, and the fixes applied.
+- **Autopilot or approve every change:** choose per client site. White-label is available on request.
+
+See [LovedByAI for agencies](https://www.lovedby.ai/agencies).
+
 ### Get started for free
 
 The plugin works with a free lovedby.ai account. The free tier includes full homepage optimization, AI crawler monitoring, and AI impression and AI visit tracking.
@@ -73,6 +86,30 @@ Review the [Privacy Policy](https://www.lovedby.ai/privacy-policy) and [Terms of
 
 ## Frequently Asked Questions
 
+### Is Yoast SEO or Rank Math enough for AI search?
+
+Yoast SEO and Rank Math handle Google's classic results: titles, meta descriptions, sitemaps and standard schema. LovedByAI adds what AI answers use on top of that: headings rewritten as the questions people ask, with short quotable answers, FAQ sections with FAQ schema, an AI-ready version of each page served as plain HTML (so AI crawlers that don't run JavaScript still read text your theme or page builder loads with scripts), and reports of AI crawler visits and AI referral traffic. It runs alongside them and merges into their schema instead of duplicating it.
+
+### Is there a free tool to check if my WordPress site is ready for AI search?
+
+Yes. The plugin works with a free lovedby.ai account, which includes full homepage optimization, AI crawler monitoring, and AI impression and AI visit tracking. To check a page without installing anything, use the free [GEO checker](https://www.lovedby.ai/tools/geo-checker).
+
+### Can I optimize my WordPress site for AI search without rebuilding it?
+
+Yes. Install the plugin and connect the site, with no code. Your theme, page builder and SEO plugin stay as they are. By default LovedByAI publishes a separate AI-ready version of each page and leaves the page your visitors see as it is. Every change is listed page by page for you to approve, reject or undo, and you choose whether approved changes go live on your site.
+
+### Can my agency use LovedByAI for client WordPress sites?
+
+Yes. Agencies can refer clients or buy licenses in bulk and move them between client sites. Each client gets an automatic monthly report (AI bot visits, mentions in AI answers, visitors from ChatGPT, Perplexity and Gemini), and white-label is available on request. See [LovedByAI for agencies](https://www.lovedby.ai/agencies).
+
+### How do I get my WooCommerce products to show up in ChatGPT shopping?
+
+ChatGPT shows products from merchants who give it a product feed. On a paid plan, LovedByAI builds that feed from your WooCommerce catalog in OpenAI's product feed format and keeps it current as you edit products. Copy the feed link from your LovedByAI dashboard and paste it into ChatGPT's merchant portal once. OpenAI decides which merchants and products it shows.
+
+### Can LovedByAI help my law firm or local business get recommended by ChatGPT?
+
+Yes. LovedByAI is built for professional firms such as lawyers, accountants, doctors and clinics, and for local businesses such as restaurants, salons and home services. It rewrites your pages around the questions customers ask AI assistants, adds FAQs and schema that state your services clearly, and shows when ChatGPT and other assistants send you visitors. No tool can guarantee a recommendation; see "Can you guarantee a citation in ChatGPT?" below.
+
 ### What is GEO? Is this a geolocation plugin?
 
 No. GEO here means generative engine optimization: optimizing a website so AI search tools such as ChatGPT, Perplexity, Gemini and Google AI Overviews can understand and cite it. LovedByAI does not detect visitor locations.
@@ -84,10 +121,6 @@ They describe the same goal from different angles. GEO (generative engine optimi
 ### Does LovedByAI work with WooCommerce?
 
 Yes. LovedByAI optimizes your store's pages like any other WordPress site, and on paid plans adds agentic commerce: a ChatGPT product feed (ACP), a Universal Commerce Protocol (UCP) product catalog for AI shopping agents, and AI agent tools for your products. It runs alongside WooCommerce's own settings and your existing Google Shopping or Facebook feed plugin.
-
-### How do I get my WooCommerce products into ChatGPT?
-
-ChatGPT shows products from merchants who give it a product feed. On a paid plan, LovedByAI builds that feed from your WooCommerce catalog in OpenAI's product feed format and keeps it current as you edit products. Copy the feed link from your LovedByAI dashboard and paste it into ChatGPT's merchant portal once. OpenAI decides which merchants and products it shows.
 
 ### What is the Agentic Commerce Protocol (ACP)?
 
@@ -120,10 +153,6 @@ Yes. The dashboard lists the AI bots that crawl your site and the pages they rea
 ### What do I need to get started?
 
 Install the plugin and register a free account at lovedby.ai.
-
-### Does LovedByAI change my content or design?
-
-Only with your approval. LovedByAI optimizes automatically, but every change is listed for review: approve it, reject it or undo it later. By default it publishes a separate AI-ready version of each page and leaves the page your visitors see as it is, and you choose whether approved changes go live on your site.
 
 ### Does it slow down my website?
 
@@ -190,6 +219,12 @@ Yes. A free account at lovedby.ai is required to use this plugin. The free tier 
 The plugin embeds a service management interface (portal app) via iframe for configuration, monitoring, and analytics. This interface is hosted on LovedByAI servers and requires an active account connection.
 
 ## Changelog
+
+### 2.9.2
+- AI agent tools: the plugin no longer sends a tracking request on every page view. Only actual tool use is recorded.
+
+### 2.9.1
+- Removing flagged pages: when the WordPress trash is turned off, pages are no longer offered for removal, so nothing is ever deleted for good. Pages already in the trash are recognised, and one unusual address no longer stops the rest from being found.
 
 ### 2.9.0
 - Remove pages flagged as not belonging to your site, straight from the dashboard. Pages go to the WordPress trash, so they can be restored for 30 days. The home page, the blog page, the privacy page and store pages are never removed.

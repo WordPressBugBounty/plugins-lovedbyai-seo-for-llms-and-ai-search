@@ -3,7 +3,7 @@
  * Plugin Name: LovedByAI - Generative Engine Optimization AI Search
  * Description: Automatically optimize your website to ensure it gets noticed by LLMs and AI search engines.
  * Plugin URI: https://lovedby.ai
- * Version: 2.9.0
+ * Version: 2.9.2
  * Author: LovedByAI
  * Author URI: https://lovedby.ai
  * Requires PHP: 7.1
@@ -2192,7 +2192,6 @@ function geoguru_render_portal_page() {
     if (geoguru_is_white_label()) {
         $params['wp_white_label'] = 'true';
     }
-    // A link from the dashboard outside wp-admin ("Open in WordPress") can name the one screen to open.
     // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only, and only an allowlisted path passes.
     $portal_path = geoguru_portal_deep_link_path(isset($_GET['portal_path']) ? wp_unslash($_GET['portal_path']) : '');
     if ($portal_path !== '') {

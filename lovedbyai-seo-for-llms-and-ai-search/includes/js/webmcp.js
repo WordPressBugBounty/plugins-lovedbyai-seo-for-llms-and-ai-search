@@ -70,20 +70,6 @@ async function main() {
         } catch {}
     }
 
-    function apiShape() {
-        const shapes = [];
-        if (document.modelContext) {
-            shapes.push('document.modelContext');
-        }
-        if (navigator.modelContext) {
-            shapes.push('navigator.modelContext');
-        }
-        if (navigator.modelContextTesting) {
-            shapes.push('navigator.modelContextTesting');
-        }
-        return shapes;
-    }
-
     let listEventsSent = 0;
     function wrapListing(obj, method, path) {
         try {
@@ -205,7 +191,6 @@ async function main() {
         return;
     }
 
-    send({ event_type: 'webmcp_ready', api_shape: apiShape() });
     wrapListing(mc, 'getTools', mcPath + '.getTools');
     wrapListing(navigator.modelContextTesting, 'listTools', 'navigator.modelContextTesting.listTools');
 

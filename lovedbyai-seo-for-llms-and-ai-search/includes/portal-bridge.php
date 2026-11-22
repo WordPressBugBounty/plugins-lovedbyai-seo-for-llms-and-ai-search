@@ -22,25 +22,20 @@ function geoguru_portal_bridge_allowed_routes() {
         '/settings/'      => array('GET', 'POST'),
         '/settings/reset' => array('POST'),
         '/token/refresh'  => array('POST'),
-        // Site cleanup: bridge only, never the proxy, so trashing always runs from the admin's own page.
+        // Relayed only, so moving pages to the trash always runs in the signed-in admin's browser.
         '/cleanup/resolve' => array('POST'),
         '/cleanup/trash'   => array('POST'),
     );
 }
 
-/**
- * The dashboard screen a link may open inside wp-admin, or '' when the value names anything else.
- * Only the site cleanup screen is allowed: `/sites/<uuid>/site-cleanup`.
- *
- * @param mixed $raw The `portal_path` query value.
- * @return string The path to pass to the dashboard, or ''.
- */
+// Only this site's own cleanup screen may be deep-linked.
 function geoguru_portal_deep_link_path($raw) {
-    if (!is_string($raw)) {
+    $site_id = strtolower((string) get_option('geoguru_site_id', ''));
+    if (!is_string($raw) || $site_id === '') {
         return '';
     }
-    $uuid = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
-    return preg_match('#^/sites/' . $uuid . '/site-cleanup\z#', $raw) === 1 ? $raw : '';
+    $path = "/sites/{$site_id}/site-cleanup";
+    return $raw === $path ? $path : '';
 }
 
 /**

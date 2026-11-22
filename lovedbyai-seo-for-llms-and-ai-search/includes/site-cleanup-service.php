@@ -1,22 +1,5 @@
 <?php
-/**
- * Site cleanup: find and trash the pages the dashboard flagged as not belonging to the site.
- *
- *   POST geoguru/v1/cleanup/resolve  { "paths": ["/a-page", ...] }  what each path is in WordPress
- *   POST geoguru/v1/cleanup/trash    { "paths": ["/a-page", ...] }  move each one to the trash
- *
- * Who may call it: only the logged-in administrator viewing the dashboard in wp-admin. The permission
- * callback is the dashboard's own (geoguru_rest_permission_callback): the 4-hour token WordPress issued to
- * that user, then `manage_options`. The site's secret token, which our servers use for other routes, is
- * never accepted here, so nothing outside the admin's browser can remove content. The dashboard only
- * reaches these routes through the wp-admin page's bridge (portal-bridge.php), never our proxy.
- *
- * Why the paths are not checked against our list of findings: the request and any list would both come
- * from the admin's own browser, and an administrator can trash any post in WordPress anyway. The guard
- * rails below protect against our mistakes instead: the front page, the posts page, the privacy page,
- * WooCommerce's pages, attachments and private post types are never trashed. And it is always the trash,
- * never a permanent delete, so a wrong pick can be restored for 30 days.
- */
+// Site cleanup REST routes: find the posts behind a list of paths, and move them to the trash.
 
 defined('ABSPATH') || exit;
 
@@ -37,12 +20,6 @@ function geoguru_register_site_cleanup_routes() {
     }
 }
 
-/**
- * The request's paths: 1 to 200 strings, each starting with `/`, no scheme or host, duplicates dropped.
- *
- * @param WP_REST_Request $request Request.
- * @return array|WP_Error The paths, or a 400.
- */
 function geoguru_site_cleanup_paths($request) {
     $body = method_exists($request, 'get_json_params') ? $request->get_json_params() : null;
     $paths = is_array($body) && array_key_exists('paths', $body) ? $body['paths'] : $request->get_param('paths');
@@ -54,27 +31,37 @@ function geoguru_site_cleanup_paths($request) {
         return new WP_Error('too_many_paths', 'at most ' . GEOGURU_SITE_CLEANUP_MAX_PATHS . ' paths', array('status' => 400));
     }
 
-    $clean = array();
+    $unique = array();
+    $seen = array();
     foreach ($paths as $path) {
-        if (!is_string($path) || $path === '' || $path[0] !== '/' || strlen($path) > GEOGURU_SITE_CLEANUP_MAX_PATH_LENGTH) {
-            return new WP_Error('invalid_paths', 'each path must start with /', array('status' => 400));
+        if (!is_string($path)) {
+            return new WP_Error('invalid_paths', 'each path must be a string', array('status' => 400));
         }
-        // `//host/x` would make home_url() point at another host.
-        if (strpos($path, '//') === 0 || strpos($path, '://') !== false || preg_match('/[\x00-\x1f\x7f]/', $path)) {
-            return new WP_Error('invalid_paths', 'each path must be a path on this site', array('status' => 400));
+        if (!isset($seen[$path])) {
+            $seen[$path] = true;
+            $unique[] = $path;
         }
-        $clean[$path] = true;
     }
-    return array_keys($clean);
+    return $unique;
 }
 
-/**
- * The path as it would appear in a link: each segment percent-encoded once. The dashboard stores paths
- * decoded (Hebrew and Russian spam slugs read as text), while WordPress stores such slugs encoded.
- *
- * @param string $path Path starting with `/`.
- * @return string Encoded path.
- */
+// An invalid path is reported on its own, so it never stops the rest of the list.
+function geoguru_site_cleanup_is_valid_path($path) {
+    return $path !== ''
+        && $path[0] === '/'
+        && strlen($path) <= GEOGURU_SITE_CLEANUP_MAX_PATH_LENGTH
+        // `//host/x` or an embedded URL could point the lookup at another host.
+        && strpos($path, '//') !== 0
+        && strpos($path, '://') === false
+        && !preg_match('/[\x00-\x1f\x7f]/', $path);
+}
+
+// With EMPTY_TRASH_DAYS at 0, wp_trash_post() deletes for good.
+function geoguru_site_cleanup_trash_days() {
+    return defined('EMPTY_TRASH_DAYS') ? (int) EMPTY_TRASH_DAYS : 30;
+}
+
+// Paths arrive decoded; WordPress stores non-Latin slugs percent-encoded.
 function geoguru_site_cleanup_encode_path($path) {
     $segments = explode('/', $path);
     foreach ($segments as $i => $segment) {
@@ -83,13 +70,6 @@ function geoguru_site_cleanup_encode_path($path) {
     return implode('/', $segments);
 }
 
-/**
- * The post a path on this site shows, or null. WordPress renames a trashed post's slug (`__trashed`), so a
- * page already in the trash usually reads as not found; one that still resolves reads as already trashed.
- *
- * @param string $path Path starting with `/`.
- * @return WP_Post|null
- */
 function geoguru_site_cleanup_find_post($path) {
     $encoded = geoguru_site_cleanup_encode_path($path);
 
@@ -107,15 +87,25 @@ function geoguru_site_cleanup_find_post($path) {
     }
     $types = get_post_types(array('public' => true, 'hierarchical' => true), 'names');
     $post = get_page_by_path($slug_path, OBJECT, array_values($types));
-    return $post ? $post : null;
+    if ($post) {
+        return $post;
+    }
+
+    // Trashing renames the slug to `<slug>__trashed`; only an unambiguous match counts.
+    $slug = substr(strrchr('/' . $slug_path, '/'), 1);
+    if (function_exists('_truncate_post_slug')) {
+        $slug = _truncate_post_slug($slug, 191);
+    }
+    $trashed = get_posts(array(
+        'name' => $slug . '__trashed',
+        'post_type' => 'any',
+        'post_status' => 'trash',
+        'posts_per_page' => 2,
+        'no_found_rows' => true,
+    ));
+    return count($trashed) === 1 ? $trashed[0] : null;
 }
 
-/**
- * Why a post must not be trashed from the dashboard, or null when it may be.
- *
- * @param WP_Post $post Post.
- * @return string|null Reason code.
- */
 function geoguru_site_cleanup_blocked_reason($post) {
     $id = (int) $post->ID;
 
@@ -153,16 +143,12 @@ function geoguru_site_cleanup_blocked_reason($post) {
     if (!current_user_can('delete_post', $id)) {
         return 'not_allowed';
     }
+    if (geoguru_site_cleanup_trash_days() === 0) {
+        return 'trash_disabled';
+    }
     return null;
 }
 
-/**
- * POST /cleanup/resolve: what each path is, so the dashboard can show what it can trash and what the
- * owner must remove by hand.
- *
- * @param WP_REST_Request $request Request.
- * @return array|WP_Error `{ results: [...] }`, one entry per path, in request order.
- */
 function geoguru_rest_site_cleanup_resolve($request) {
     $paths = geoguru_site_cleanup_paths($request);
     if (is_wp_error($paths)) {
@@ -171,7 +157,8 @@ function geoguru_rest_site_cleanup_resolve($request) {
 
     $results = array();
     foreach ($paths as $path) {
-        $post = geoguru_site_cleanup_find_post($path);
+        $valid = geoguru_site_cleanup_is_valid_path($path);
+        $post = $valid ? geoguru_site_cleanup_find_post($path) : null;
         if (!$post) {
             $results[] = array(
                 'path' => $path,
@@ -180,7 +167,7 @@ function geoguru_rest_site_cleanup_resolve($request) {
                 'title' => null,
                 'status' => null,
                 'edit_url' => null,
-                'blocked' => null,
+                'blocked' => $valid ? null : 'invalid_path',
             );
             continue;
         }
@@ -200,16 +187,28 @@ function geoguru_rest_site_cleanup_resolve($request) {
         'paths' => count($paths),
         'found' => count(array_filter($results, function ($r) { return $r['post_id'] !== null; })),
     ));
-    return array('results' => $results);
+    return array('results' => $results, 'trash_days' => geoguru_site_cleanup_trash_days());
 }
 
-/**
- * POST /cleanup/trash: move each path's post to the trash. Finds every post itself; never takes post ids
- * from the request.
- *
- * @param WP_REST_Request $request Request.
- * @return array|WP_Error `{ results: [...] }`, one entry per path, in request order.
- */
+function geoguru_site_cleanup_trash_one($path) {
+    if (!geoguru_site_cleanup_is_valid_path($path)) {
+        return array('path' => $path, 'result' => 'blocked', 'post_id' => null, 'reason' => 'invalid_path');
+    }
+    $post = geoguru_site_cleanup_find_post($path);
+    if (!$post) {
+        return array('path' => $path, 'result' => 'not_found', 'post_id' => null);
+    }
+    if ($post->post_status === 'trash') {
+        return array('path' => $path, 'result' => 'already_trashed', 'post_id' => (int) $post->ID);
+    }
+    $reason = geoguru_site_cleanup_blocked_reason($post);
+    if ($reason !== null) {
+        return array('path' => $path, 'result' => 'blocked', 'post_id' => (int) $post->ID, 'reason' => $reason);
+    }
+    $result = wp_trash_post($post->ID) ? 'trashed' : 'failed';
+    return array('path' => $path, 'result' => $result, 'post_id' => (int) $post->ID);
+}
+
 function geoguru_rest_site_cleanup_trash($request) {
     $paths = geoguru_site_cleanup_paths($request);
     if (is_wp_error($paths)) {
@@ -219,25 +218,12 @@ function geoguru_rest_site_cleanup_trash($request) {
     $results = array();
     $counts = array('trashed' => 0, 'already_trashed' => 0, 'not_found' => 0, 'blocked' => 0, 'failed' => 0);
     $trashed_ids = array();
-
     foreach ($paths as $path) {
-        $post = geoguru_site_cleanup_find_post($path);
-        if (!$post) {
-            $entry = array('path' => $path, 'result' => 'not_found', 'post_id' => null);
-        } elseif ($post->post_status === 'trash') {
-            $entry = array('path' => $path, 'result' => 'already_trashed', 'post_id' => (int) $post->ID);
-        } else {
-            $reason = geoguru_site_cleanup_blocked_reason($post);
-            if ($reason !== null) {
-                $entry = array('path' => $path, 'result' => 'blocked', 'post_id' => (int) $post->ID, 'reason' => $reason);
-            } elseif (wp_trash_post($post->ID)) {
-                $entry = array('path' => $path, 'result' => 'trashed', 'post_id' => (int) $post->ID);
-                $trashed_ids[] = (int) $post->ID;
-            } else {
-                $entry = array('path' => $path, 'result' => 'failed', 'post_id' => (int) $post->ID);
-            }
-        }
+        $entry = geoguru_site_cleanup_trash_one($path);
         $counts[$entry['result']]++;
+        if ($entry['result'] === 'trashed') {
+            $trashed_ids[] = $entry['post_id'];
+        }
         $results[] = $entry;
     }
 
