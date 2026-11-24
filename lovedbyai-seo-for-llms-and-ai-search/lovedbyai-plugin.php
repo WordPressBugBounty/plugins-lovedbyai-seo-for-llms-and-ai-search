@@ -3,7 +3,7 @@
  * Plugin Name: LovedByAI - Generative Engine Optimization AI Search
  * Description: Automatically optimize your website to ensure it gets noticed by LLMs and AI search engines.
  * Plugin URI: https://lovedby.ai
- * Version: 2.9.2
+ * Version: 2.10.0
  * Author: LovedByAI
  * Author URI: https://lovedby.ai
  * Requires PHP: 7.1
@@ -46,6 +46,7 @@ $geoguru_required_files = [
     'includes/overlay-payload.php',
     'includes/overlay-rest.php',
     'includes/overlay-reader.php',
+    'includes/page-delivery.php',
     'includes/portal-bridge.php',
     'includes/content-signals-service.php',
     'includes/discovery-posts-service.php',

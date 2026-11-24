@@ -7,6 +7,7 @@ if (!defined('ABSPATH')) {
 
 require_once __DIR__ . '/serving-guard.php';
 require_once __DIR__ . '/webmcp-settings.php';
+require_once __DIR__ . '/page-delivery.php';
 
 if (!class_exists('GeoGuru_RequestsInterceptor')) {
     class GeoGuru_RequestsInterceptor {
@@ -15,10 +16,6 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
         private $is_intercepting = false;
         private $shortcode_rendered = false;
         private $supabase_service;
-        // Set once by intercept_request(), which is the only place delivery is inspected. The
-        // shortcode callback fires later, during rendering, and reads the decision rather than
-        // re-deciding.
-        private $llm_link_enabled = false;
 
         public static function get_instance(): GeoGuru_RequestsInterceptor {
             if (null === self::$instance) {
@@ -115,10 +112,17 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
             return $this->is_intercepting;
         }
 
+        private function link_enabled() {
+            return geoguru_request_delivery()['mirror'] !== 'off';
+        }
+
         /**
          * Enqueue dynamic styles for LLM version link
          */
         public function enqueue_llm_link_styles() {
+            if (!$this->link_enabled()) {
+                return;
+            }
             // Check if we should show the link (same logic as display_footer_links)
             $options = get_option('geoguru_llm_version_settings', array());
             
@@ -153,6 +157,9 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
          * Enqueue inline JavaScript for LLM version link positioning
          */
         public function enqueue_llm_link_script() {
+            if (!$this->link_enabled()) {
+                return;
+            }
             // Check if we should show the link (same logic as display_footer_links)
             $options = get_option('geoguru_llm_version_settings', array());
             $show_on_posts = isset($options['show_on_posts']) ? $options['show_on_posts'] : 1;
@@ -162,7 +169,7 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
             if (is_single() && $show_on_posts) {
                 $should_show = true;
             }
-            if (is_page() || is_home() && $show_on_pages) {
+            if ((is_page() || is_home()) && $show_on_pages) {
                 $should_show = true;
             }
             
@@ -220,7 +227,7 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
         public function render_llm_link_shortcode($atts) {
             // The link points at the mirror; with no mirror there is nothing to point at. Return an
             // empty string rather than deregistering the shortcode, which would print the raw tag.
-            if (!$this->llm_link_enabled) {
+            if (!$this->link_enabled()) {
                 return '';
             }
 
@@ -277,68 +284,35 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
 
             $this->maybe_disable_litespeed_for_optimizer();
 
-            // The one place delivery is read. Everything below decides from these locals; the
-            // functions they call take no view of their own, so there is a single answer per
-            // request to what this site delivers and where.
-            $delivery = geoguru_get_delivery_settings();
-            $this->llm_link_enabled = $delivery['mirror'] !== 'off';
-            if ($this->llm_link_enabled) {
-                // Yoast SEO's "Remove unregistered URL parameters" 301s ?llm_view=1 back to the
-                // clean URL before the mirror is served, so the footer link just reloads the page.
-                add_filter('Yoast\\WP\\SEO\\allowlist_permalink_vars', array($this, 'allow_llm_view_query_var'));
-            }
-            // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only surface check, no nonce needed
-            $is_mirror_request = isset($_GET[GEOGURU_LLM_VIEW_QUERY_ARG]) && $_GET[GEOGURU_LLM_VIEW_QUERY_ARG] == '1';
-
             // Serving a complete optimized document at the canonical URL. This path echoes its own
             // response for bots and must never be combined with the overlay, which buffers and
             // merges into the normal WordPress render.
-            if ($delivery['original'] === 'cdn_fetch') {
+            if (geoguru_get_delivery_settings()['original'] === 'cdn_fetch') {
                 $this->handle_optimize_on_page();
                 return;
             }
 
-            // Always registered, even when the link is suppressed: without add_shortcode()
-            // WordPress renders [lovedbyai_link] as literal text on every page that uses it.
-            // render_llm_link_shortcode() returns an empty string instead.
+            // Always set up: a page's own setting can turn these on, and each callback checks it.
+            add_filter('Yoast\\WP\\SEO\\allowlist_permalink_vars', array($this, 'allow_llm_view_query_var'));
+            // Registered even when the link is hidden, or WordPress prints the raw tag.
             add_shortcode('lovedbyai_link', array($this, 'render_llm_link_shortcode'));
-
-            if ($this->llm_link_enabled) {
-                add_action('wp_enqueue_scripts', array($this, 'enqueue_llm_link_styles'));
-                add_action('wp_enqueue_scripts', array($this, 'enqueue_llm_link_script'));
-            }
-
-            // The overlay is needed for this render when the canonical page's own mechanism calls
-            // for it, or -- independently -- when this is the ?llm_view=1 mirror and the mirror's
-            // own mechanism does, even if `original` is off. geoguru_overlay_register() re-derives
-            // both and makes the precise decision (e.g. never double up with a CDN-served mirror);
-            // this is only the coarse pre-check for whether it is worth calling at all.
-            $needs_overlay = $delivery['original'] === 'page_replacement'
-                || ($is_mirror_request && $delivery['mirror'] === 'page_replacement');
-            if ($needs_overlay && function_exists('geoguru_overlay_register')) {
-                geoguru_overlay_register();
-            }
+            add_action('wp_enqueue_scripts', array($this, 'enqueue_llm_link_styles'));
+            add_action('wp_enqueue_scripts', array($this, 'enqueue_llm_link_script'));
+            geoguru_overlay_register();
 
             $bot_parameters = $this->detect_current_bot();
             if ($bot_parameters['is_bot']) {
                 $this->log_bot_crawl_on_shutdown($bot_parameters);
             }
 
-            if ($is_mirror_request) {
-                // cdn_fetch serves the pre-built document at the CDN object key directly.
-                if ($delivery['mirror'] === 'cdn_fetch') {
-                    $this->handle_llm_version_page();
-                }
-                // Otherwise fall through to a normal WordPress render. Mirror off is deliberate --
-                // an already-crawled ?llm_view=1 URL keeps serving the canonical page's own
-                // mechanism. Mirror page_replacement falls through here too: the overlay
-                // registered above applies the stored payload to this very render.
+            if (geoguru_is_mirror_request()) {
+                // Set for every ?llm_view=1 request: the page's own setting is not known yet here.
+                add_filter('litespeed_can_optm', '__return_false');
+                add_action('template_redirect', array($this, 'serve_llm_version_if_cdn'), PHP_INT_MAX);
                 return;
             }
 
-            if ($this->llm_link_enabled) {
-                add_action('wp_footer', array($this, 'display_footer_links'));
-            }
+            add_action('wp_footer', array($this, 'display_footer_links'));
         }
 
         /**
@@ -346,7 +320,9 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
          */
         public function allow_llm_view_query_var($allowed) {
             $allowed = is_array($allowed) ? $allowed : array();
-            $allowed[] = GEOGURU_LLM_VIEW_QUERY_ARG;
+            if ($this->link_enabled()) {
+                $allowed[] = GEOGURU_LLM_VIEW_QUERY_ARG;
+            }
             return $allowed;
         }
 
@@ -524,62 +500,38 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
             });
         }
 
-        public function handle_llm_version_page() {
-            $this->logger->debug('Handling LLM version page', ['wp_hook' => current_action()]);
-
-            // Disable LiteSpeed Cache page optimization (CSS/JS combining, script
-            // deferral) for ?llm_view=1 requests.  When LiteSpeed defers scripts it
-            // rewrites their type to "litespeed/javascript" and relies on its own
-            // loader to re-enable them.  If the page bypasses the LiteSpeed page
-            // cache (e.g. because of a Set-Cookie / PHP session), the loader never
-            // fires and all JS/CSS remains disabled, breaking the page.  Disabling
-            // page optimization here is safe: when CDN content IS found the plugin
-            // calls exit() before LiteSpeed can act, and when CDN content is NOT
-            // found the page falls through to normal WordPress rendering unharmed.
-            add_filter('litespeed_can_optm', '__return_false');
-
-            $optimized_content = $this->get_optimized_content();
-
-            if (!$optimized_content) {
+        public function serve_llm_version_if_cdn() {
+            if (geoguru_request_delivery()['mirror'] !== 'cdn_fetch') {
                 return;
             }
-            
-            $this->logger->debug('Registering template_redirect to output optimized content', ['wp_hook' => current_action()]);
-            
-            // Use template_redirect instead of template_include - fires earlier and allows us to stop processing. some themes continue rendering using template include although it returns null, therefore, it might cause duplicated content issues. the exist is neccesary to avoid this.
-            add_action('template_redirect', function() use ($optimized_content) {
-                if (!$optimized_content) {
-                    $this->logger->debug('Optimized content not found, returning original content', ['wp_hook' => current_action()]);    
-                    return;
-                }
-                // WordPress does not serve this page -- a 404, an unpublished post, a password form --
-                // so neither does the mirror: fall through to WordPress's own response instead of
-                // forcing a 200 over it with a stale copy.
-                if (geoguru_is_unservable_request()) {
-                    $this->logger->debug('Page not served by WordPress, LLM version not served', ['wp_hook' => current_action()]);
-                    return;
-                }
-                $this->logger->debug('Displaying LLM version page', ['wp_hook' => current_action()]);
-                
-                // Set proper headers
-                status_header(200);
-                header('Content-Type: text/html; charset=UTF-8');
-                
-                // Output our optimized content (complete HTML document with meta tags already included)
-                // SECURITY NOTE: Content is intentionally unescaped because:
-                // 1. Content is a complete HTML document that must be served as-is to preserve functionality
-                // 2. Content originates from our trusted CDN (not user-generated or untrusted source)
-                // 3. Content is generated by our service from the website owner's own pages
-                // 4. wp_kses would strip necessary HTML/JavaScript and break page functionality
-                // 5. Access is controlled (only served to verified bot requests with site credentials)
-                // 6. Content is isolated via template_redirect + exit, preventing WordPress template processing
-                // Exception request submitted to WordPress Plugin Review Team - awaiting approval
-                // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
-                echo $optimized_content;
-                
-                // Stop WordPress from processing further - prevents duplication
-                exit;
-            }, PHP_INT_MAX);
+            // WordPress does not serve this page, so neither does the mirror.
+            if (geoguru_is_unservable_request()) {
+                $this->logger->debug('Page not served by WordPress, LLM version not served', ['wp_hook' => current_action()]);
+                return;
+            }
+            $optimized_content = $this->get_optimized_content();
+            if (!$optimized_content) {
+                $this->logger->debug('Optimized content not found, returning original content', ['wp_hook' => current_action()]);
+                return;
+            }
+            $this->logger->debug('Displaying LLM version page', ['wp_hook' => current_action()]);
+
+            status_header(200);
+            header('Content-Type: text/html; charset=UTF-8');
+
+            // SECURITY NOTE: Content is intentionally unescaped because:
+            // 1. Content is a complete HTML document that must be served as-is to preserve functionality
+            // 2. Content originates from our trusted CDN (not user-generated or untrusted source)
+            // 3. Content is generated by our service from the website owner's own pages
+            // 4. wp_kses would strip necessary HTML/JavaScript and break page functionality
+            // 5. Access is controlled (only served to verified bot requests with site credentials)
+            // 6. Content is isolated via template_redirect + exit, preventing WordPress template processing
+            // Exception request submitted to WordPress Plugin Review Team - awaiting approval
+            // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+            echo $optimized_content;
+
+            // Stop WordPress from rendering the theme as well.
+            exit;
         }
 
         /**
@@ -646,6 +598,9 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
         }
 
         public function display_footer_links() {
+            if (!$this->link_enabled()) {
+                return;
+            }
             // Skip footer output if shortcode already rendered the link
             if ($this->shortcode_rendered) {
                 $this->logger->debug('LLM link already rendered via shortcode, skipping footer', ['wp_hook' => current_action()]);
@@ -671,7 +626,7 @@ if (!class_exists('GeoGuru_RequestsInterceptor')) {
                 $should_show = true;
             }
             
-            if (is_page() || is_home() && $show_on_pages) {
+            if ((is_page() || is_home()) && $show_on_pages) {
                 $should_show = true;
             }
             

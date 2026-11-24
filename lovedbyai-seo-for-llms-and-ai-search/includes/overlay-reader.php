@@ -16,63 +16,28 @@ if (!defined('ABSPATH')) {
 require_once __DIR__ . '/schema-organization-types.php';
 // Same local-require reasoning: the overlay tests load this file without booting the plugin.
 require_once __DIR__ . '/serving-guard.php';
+require_once __DIR__ . '/page-delivery.php';
 
 if (!defined('GEOGURU_OVERLAY_POST_META_KEY')) {
     define('GEOGURU_OVERLAY_POST_META_KEY', '_geoguru_overlay_payload_v1');
 }
 
 function geoguru_overlay_register() {
-    $delivery = geoguru_get_delivery_settings();
-    // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only surface check, no nonce needed
-    $is_mirror_request = isset($_GET[GEOGURU_LLM_VIEW_QUERY_ARG]) && $_GET[GEOGURU_LLM_VIEW_QUERY_ARG] == '1';
-
-    if ($is_mirror_request) {
-        // The mirror decides this render on its own axis, not the canonical page's (`original`).
-        // cdn_fetch serves a complete document from the CDN, and overlaying it would merge our
-        // fields into a page that already carries them.
-        if ($delivery['mirror'] === 'cdn_fetch') {
-            return;
-        }
-        // Mirror off leaves ?llm_view=1 as nothing more than the canonical page under a query arg
-        // -- those URLs have been linked and crawled for months, so it is overlaid on exactly the
-        // condition the canonical page itself is, not left to serve unoptimized HTML.
-        if ($delivery['mirror'] === 'off' && $delivery['original'] !== 'page_replacement') {
-            return;
-        }
-        // Otherwise mirror === 'page_replacement': apply the overlay to this render regardless of
-        // what the canonical page (`original`) is doing. That is the whole point of the mechanism
-        // on the mirror -- the canonical page can stay untouched while ?llm_view=1 still carries it.
-    } elseif ($delivery['original'] !== 'page_replacement') {
-        // The canonical page is untouched when its own mechanism is not page_replacement,
-        // regardless of what the mirror is doing.
-        return;
-    }
-
-    // Never overlay one of our own fetches. The optimizer requests the plain URL, so with the
-    // overlay applied it reads its own previous output back as the page's "original content" and
-    // rewrites it again on the next run. Measured on the meta title: 0% of re-optimizations before
-    // this overlay shipped (2026-06-22), 26% the month after, 39% two months after. Today the
-    // overlay only touches <head>, so only the title loops; extending it to the body would put
-    // every visible heading in the same loop.
-    if (geoguru_overlay_is_lovedbyai_fetch()) {
-        // Our fetch shares its URL with real visitors, so a page cache populated from THIS
-        // response would go on serving the un-overlaid page to everyone. Keep it out of the cache.
-        if (!defined('DONOTCACHEPAGE')) {
-            define('DONOTCACHEPAGE', true);
-        }
-        return;
-    }
-
-    // Which surface this render is, resolved once here where the delivery pair is already in
-    // hand. start_buffer() reads this instead of looking at $_GET again -- two places deciding the
-    // same thing is how they come to disagree. With the mirror off, ?llm_view=1 is the canonical
-    // page under a query arg (see above): it is overlaid on the canonical page's own condition, so
-    // it carries the canonical page's content, not the mirror's.
-    $GLOBALS['geoguru_overlay_target'] = ($is_mirror_request && $delivery['mirror'] === 'page_replacement')
-        ? GEOGURU_OVERLAY_TARGET_MIRROR
-        : GEOGURU_OVERLAY_TARGET_ORIGINAL;
-
     add_action('template_redirect', 'geoguru_overlay_start_buffer', 10);
+}
+
+function geoguru_overlay_target_for($pair, $is_mirror_request) {
+    if ($is_mirror_request) {
+        // A CDN-served mirror is already a complete document.
+        if ($pair['mirror'] === 'cdn_fetch') {
+            return null;
+        }
+        if ($pair['mirror'] === 'page_replacement') {
+            return GEOGURU_OVERLAY_TARGET_MIRROR;
+        }
+        // With the mirror off, ?llm_view=1 is the canonical page under a query arg.
+    }
+    return $pair['original'] === 'page_replacement' ? GEOGURU_OVERLAY_TARGET_ORIGINAL : null;
 }
 
 /**
@@ -156,17 +121,24 @@ function geoguru_overlay_start_buffer() {
         return; // overlay is post-scoped; non-singular views have nothing to apply
     }
 
+    $target = geoguru_overlay_target_for(geoguru_request_delivery(), geoguru_is_mirror_request());
+    if ($target === null) {
+        return;
+    }
+
+    // Our own fetch must read the site's content and must not seed a shared page cache.
+    if (geoguru_overlay_is_lovedbyai_fetch()) {
+        if (!defined('DONOTCACHEPAGE')) {
+            define('DONOTCACHEPAGE', true);
+        }
+        return;
+    }
+
     $raw = get_post_meta($post_id, GEOGURU_OVERLAY_POST_META_KEY, true);
     $envelope = geoguru_overlay_envelope_from_meta($raw, $post_id);
     if ($envelope === null) {
         return;
     }
-
-    // register() resolved the surface for this render. Falling back to the canonical page is the
-    // conservative reading: mirror-only entries then stay off a page they were never targeted at.
-    $target = isset($GLOBALS['geoguru_overlay_target'])
-        ? $GLOBALS['geoguru_overlay_target']
-        : GEOGURU_OVERLAY_TARGET_ORIGINAL;
 
     $payload = geoguru_overlay_head_payload($envelope, $target);
     // Blocks are filtered once, here, by the same default-deny helper the REST writer uses. The
@@ -179,8 +151,6 @@ function geoguru_overlay_start_buffer() {
     $GLOBALS['geoguru_overlay_payload'] = $payload;
     $GLOBALS['geoguru_overlay_blocks'] = $blocks;
     $GLOBALS['geoguru_overlay_post_id'] = $post_id;
-    // Normalised, not re-read: the fallback above has already been applied, so the output filter
-    // reports the same surface the blocks were filtered for.
     $GLOBALS['geoguru_overlay_target'] = $target;
     ob_start('geoguru_overlay_filter_output');
 }
