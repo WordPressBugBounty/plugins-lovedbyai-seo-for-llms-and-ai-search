@@ -3,7 +3,7 @@
  * Plugin Name: LovedByAI - Generative Engine Optimization AI Search
  * Description: Automatically optimize your website to ensure it gets noticed by LLMs and AI search engines.
  * Plugin URI: https://lovedby.ai
- * Version: 2.10.0
+ * Version: 2.10.1
  * Author: LovedByAI
  * Author URI: https://lovedby.ai
  * Requires PHP: 7.1
@@ -2152,6 +2152,22 @@ function geoguru_render_log_viewer_page() {
     <?php
 }
 
+// A signed-out visitor has no website to look the brand up by, so white-label installs pass it to the portal.
+function geoguru_white_label_portal_params() {
+    if (!geoguru_is_white_label()) {
+        return array();
+    }
+    $params = array(
+        'wp_white_label' => 'true',
+        'wp_brand_name' => geoguru_get_plugin_name(),
+    );
+    $brand_logo_url = esc_url_raw(get_option('geoguru_brand_logo', ''));
+    if ($brand_logo_url !== '') {
+        $params['wp_brand_logo'] = $brand_logo_url;
+    }
+    return $params;
+}
+
 // Render the GeoGuru portal app in an iframe (for the top-level menu)
 function geoguru_render_portal_page() {
     geoguru_prune_expired_iframe_tokens();
@@ -2190,9 +2206,7 @@ function geoguru_render_portal_page() {
         // /settings reports this too, but not until a request has come back.
         'wp_plugin_version' => GEOGURU_PLUGIN_VERSION,
     );
-    if (geoguru_is_white_label()) {
-        $params['wp_white_label'] = 'true';
-    }
+    $params += geoguru_white_label_portal_params();
     // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only, and only an allowlisted path passes.
     $portal_path = geoguru_portal_deep_link_path(isset($_GET['portal_path']) ? wp_unslash($_GET['portal_path']) : '');
     if ($portal_path !== '') {
@@ -2257,9 +2271,7 @@ function geoguru_render_portal_settings_page() {
         // /settings reports this too, but not until a request has come back.
         'wp_plugin_version' => GEOGURU_PLUGIN_VERSION,
     );
-    if (geoguru_is_white_label()) {
-        $params['wp_white_label'] = 'true';
-    }
+    $params += geoguru_white_label_portal_params();
     $query_params = http_build_query($params);
 
     $iframe_src = $safe_portal_url . '/wordpress?' . $query_params;

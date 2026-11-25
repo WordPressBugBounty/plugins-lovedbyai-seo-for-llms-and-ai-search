@@ -4,7 +4,7 @@ Tags: ai seo, geo, aeo, chatgpt, agentic commerce
 Requires at least: 5.8
 Tested up to: 7.1
 Requires PHP: 7.1
-Stable tag: 2.10.0
+Stable tag: 2.10.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -219,6 +219,9 @@ Yes. A free account at lovedby.ai is required to use this plugin. The free tier 
 The plugin embeds a service management interface (portal app) via iframe for configuration, monitoring, and analytics. This interface is hosted on LovedByAI servers and requires an active account connection.
 
 ## Changelog
+
+### 2.10.1
+- Sign-in screen: when the plugin carries an agency's branding, it now shows that brand's name and logo before you sign in.
 
 ### 2.10.0
 - Prepares for per-page optimization settings; nothing changes on your site today.
